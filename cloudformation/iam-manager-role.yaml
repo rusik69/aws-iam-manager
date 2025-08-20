@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'IAM Manager Role - Allows cross-account access for IAM user management'
+
+Parameters:
+  MasterAccountId:
+    Type: String
+    Description: 'The AWS Account ID of the master account that will assume this role'
+    Default: '257801542589'
+  
+  RoleName:
+    Type: String
+    Description: 'Name of the IAM role to create'
+    Default: 'OrganizationAccountAccessRole'
+    
+  MasterUserName:
+    Type: String
+    Description: 'Name of the IAM user in the master account'
+    Default: 'iam-manager'
+
+Resources:
+  IAMManagerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      Description: 'Role for AWS IAM Manager to perform user management operations'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: 
+                - !Sub 'arn:aws:iam::${MasterAccountId}:user/${MasterUserName}'
+                - !Sub 'arn:aws:iam::${MasterAccountId}:root'
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Sub '${AWS::AccountId}-iam-manager'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/IAMFullAccess'
+      Tags:
+        - Key: 'Purpose'
+          Value: 'AWS IAM Manager Cross-Account Access'
+        - Key: 'CreatedBy'
+          Value: 'CloudFormation StackSet'
+        - Key: 'Environment'
+          Value: 'Production'
+
+  # Custom policy for additional permissions if needed
+  IAMManagerCustomPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: 'IAMManagerCustomPermissions'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: 'AllowIAMUserManagement'
+            Effect: Allow
+            Action:
+              - 'iam:ListUsers'
+              - 'iam:GetUser'
+              - 'iam:CreateUser'
+              - 'iam:DeleteUser'
+              - 'iam:UpdateUser'
+              - 'iam:TagUser'
+              - 'iam:UntagUser'
+              - 'iam:ListUserTags'
+              - 'iam:GetLoginProfile'
+              - 'iam:CreateLoginProfile'
+              - 'iam:UpdateLoginProfile'
+              - 'iam:DeleteLoginProfile'
+              - 'iam:ListAccessKeys'
+              - 'iam:CreateAccessKey'
+              - 'iam:DeleteAccessKey'
+              - 'iam:UpdateAccessKey'
+              - 'iam:GetAccessKeyLastUsed'
+              - 'iam:ListUserPolicies'
+              - 'iam:ListAttachedUserPolicies'
+              - 'iam:AttachUserPolicy'
+              - 'iam:DetachUserPolicy'
+              - 'iam:PutUserPolicy'
+              - 'iam:DeleteUserPolicy'
+              - 'iam:ListGroupsForUser'
+              - 'iam:AddUserToGroup'
+              - 'iam:RemoveUserFromGroup'
+            Resource: '*'
+          - Sid: 'AllowGroupManagement'
+            Effect: Allow
+            Action:
+              - 'iam:ListGroups'
+              - 'iam:GetGroup'
+              - 'iam:CreateGroup'
+              - 'iam:DeleteGroup'
+              - 'iam:UpdateGroup'
+            Resource: '*'
+          - Sid: 'AllowPolicyManagement'
+            Effect: Allow
+            Action:
+              - 'iam:ListPolicies'
+              - 'iam:GetPolicy'
+              - 'iam:GetPolicyVersion'
+              - 'iam:ListPolicyVersions'
+            Resource: '*'
+          - Sid: 'AllowAccountSummary'
+            Effect: Allow
+            Action:
+              - 'iam:GetAccountSummary'
+              - 'iam:GetAccountPasswordPolicy'
+            Resource: '*'
+      Roles:
+        - !Ref IAMManagerRole
+
+Outputs:
+  RoleArn:
+    Description: 'ARN of the created IAM role'
+    Value: !GetAtt IAMManagerRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+      
+  RoleName:
+    Description: 'Name of the created IAM role'
+    Value: !Ref IAMManagerRole
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleName'
+      
+  AssumeRoleCommand:
+    Description: 'CLI command to assume this role'
+    Value: !Sub 'aws sts assume-role --role-arn ${IAMManagerRole.Arn} --role-session-name IAMManager --external-id ${AWS::AccountId}-iam-manager'
