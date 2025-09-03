@@ -47,11 +47,11 @@ describe('Accounts.vue', () => {
 
   it('renders accounts list when data is loaded', async () => {
     expect(wrapper.find('h2').text()).toBe('AWS Accounts')
-    expect(wrapper.findAll('.card')).toHaveLength(2)
+    expect(wrapper.findAll('.card')).toHaveLength(3) // 1 header card + 2 account cards
   })
 
   it('displays account information correctly', async () => {
-    const firstAccountCard = wrapper.findAll('.card')[0]
+    const firstAccountCard = wrapper.findAll('.card')[1] // Skip header card
     expect(firstAccountCard.find('h3').text()).toBe('Test Account 1')
     expect(firstAccountCard.text()).toContain('123456789012')
   })
@@ -102,12 +102,12 @@ describe('Accounts.vue', () => {
   it('renders all account data', async () => {
     const accountCards = wrapper.findAll('.card')
     
-    // Check first account
-    expect(accountCards[0].text()).toContain('Test Account 1')
-    expect(accountCards[0].text()).toContain('123456789012')
+    // Check first account (index 1, skip header card)
+    expect(accountCards[1].text()).toContain('Test Account 1')
+    expect(accountCards[1].text()).toContain('123456789012')
     
-    // Check second account
-    expect(accountCards[1].text()).toContain('Test Account 2')
-    expect(accountCards[1].text()).toContain('123456789013')
+    // Check second account (index 2)
+    expect(accountCards[2].text()).toContain('Test Account 2')
+    expect(accountCards[2].text()).toContain('123456789013')
   })
 })

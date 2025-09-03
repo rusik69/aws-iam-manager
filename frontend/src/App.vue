@@ -1,35 +1,19 @@
 <template>
-  <div id="app" :class="{ 'dark-theme': isDarkTheme }">
-    <header class="header">
-      <div class="header-content">
-        <div class="header-left">
-          <div class="logo">
-            <svg class="logo-icon" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L15 1H5C3.89 1 3 1.89 3 3V18A2 2 0 0 0 5 20H11V18H5V3H13V9H21Z"/>
-              <path d="M17 13C15.34 13 14 14.34 14 16S15.34 19 17 19 20 17.66 20 16 18.66 13 17 13M17 14.5C18.11 14.5 19 15.39 19 16.5S18.11 18.5 17 18.5 15 17.61 15 16.5 15.89 14.5 17 14.5M24 16L22.5 14.5L17 20L14.5 17.5L13 19L17 23L24 16Z"/>
-            </svg>
-            <h1>AWS IAM Manager</h1>
-          </div>
+  <div id="app" :class="{ dark: isDarkTheme }">
+    <header>
+      <div class="container">
+        <div class="logo">
+          <h1>AWS IAM Manager</h1>
         </div>
-        <nav class="nav">
-          <router-link to="/" class="nav-link">
-            <svg class="nav-icon" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M10 20V14H14V20H19V12H22L12 3L2 12H5V20H10Z"/>
-            </svg>
-            Accounts
-          </router-link>
-          <button @click="toggleTheme" class="theme-toggle" :title="isDarkTheme ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
-            <svg v-if="isDarkTheme" class="theme-icon" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM18.894 6.166a.75.75 0 00-1.06-1.06l-1.591 1.59a.75.75 0 101.06 1.061l1.591-1.59zM21.75 12a.75.75 0 01-.75.75h-2.25a.75.75 0 010-1.5H21a.75.75 0 01.75.75zM17.834 18.894a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 10-1.061 1.06l1.59 1.591zM12 18a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25A.75.75 0 0112 18zM7.758 17.303a.75.75 0 00-1.061-1.06l-1.591 1.59a.75.75 0 001.06 1.061l1.591-1.59zM6 12a.75.75 0 01-.75.75H3a.75.75 0 010-1.5h2.25A.75.75 0 016 12zM6.697 7.757a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 00-1.061 1.06l1.59 1.591z"/>
-            </svg>
-            <svg v-else class="theme-icon" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/>
-            </svg>
+        <nav>
+          <router-link to="/">Accounts</router-link>
+          <button @click="toggleTheme" class="theme-btn">
+            {{ isDarkTheme ? '☀️' : '🌙' }}
           </button>
         </nav>
       </div>
     </header>
-    <main class="main">
+    <main>
       <router-view />
     </main>
   </div>
@@ -71,83 +55,6 @@ export default {
 </script>
 
 <style>
-:root {
-  /* Light theme colors */
-  --color-bg-primary: #ffffff;
-  --color-bg-secondary: #f8f9fa;
-  --color-bg-tertiary: #e9ecef;
-  --color-bg-accent: #007bff;
-  --color-text-primary: #212529;
-  --color-text-secondary: #6c757d;
-  --color-text-tertiary: #adb5bd;
-  --color-text-inverse: #ffffff;
-  --color-border: #dee2e6;
-  --color-border-light: #e9ecef;
-  --color-shadow: rgba(0, 0, 0, 0.1);
-  --color-shadow-light: rgba(0, 0, 0, 0.05);
-  
-  /* Status colors */
-  --color-success: #28a745;
-  --color-danger: #dc3545;
-  --color-warning: #ffc107;
-  --color-info: #17a2b8;
-  
-  /* Button colors */
-  --color-btn-primary: #007bff;
-  --color-btn-primary-hover: #0056b3;
-  --color-btn-secondary: #6c757d;
-  --color-btn-secondary-hover: #545b62;
-  --color-btn-danger: #dc3545;
-  --color-btn-danger-hover: #c82333;
-  --color-btn-warning: #ffc107;
-  --color-btn-warning-hover: #e0a800;
-  
-  /* Header colors */
-  --color-header-bg: #343a40;
-  --color-header-text: #ffffff;
-  --color-header-accent: #007bff;
-  
-  /* Spacing */
-  --spacing-xs: 0.25rem;
-  --spacing-sm: 0.5rem;
-  --spacing-md: 1rem;
-  --spacing-lg: 1.5rem;
-  --spacing-xl: 2rem;
-  --spacing-xxl: 3rem;
-  
-  /* Border radius */
-  --radius-sm: 0.25rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
-  
-  /* Animations */
-  --transition-fast: 0.15s ease-in-out;
-  --transition-normal: 0.2s ease-in-out;
-  --transition-slow: 0.3s ease-in-out;
-}
-
-[data-theme="dark"] {
-  /* Dark theme colors */
-  --color-bg-primary: #1a1a1a;
-  --color-bg-secondary: #2d3748;
-  --color-bg-tertiary: #4a5568;
-  --color-bg-accent: #3182ce;
-  --color-text-primary: #f7fafc;
-  --color-text-secondary: #cbd5e0;
-  --color-text-tertiary: #a0aec0;
-  --color-text-inverse: #1a202c;
-  --color-border: #4a5568;
-  --color-border-light: #2d3748;
-  --color-shadow: rgba(0, 0, 0, 0.3);
-  --color-shadow-light: rgba(0, 0, 0, 0.15);
-  
-  /* Header colors for dark theme */
-  --color-header-bg: #1a202c;
-  --color-header-text: #f7fafc;
-  --color-header-accent: #3182ce;
-}
-
 * {
   margin: 0;
   padding: 0;
@@ -155,11 +62,15 @@ export default {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
-  background-color: var(--color-bg-secondary);
-  color: var(--color-text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #f5f5f5;
+  color: #333;
   line-height: 1.6;
-  transition: background-color var(--transition-normal), color var(--transition-normal);
+}
+
+.dark body {
+  background: #1a1a1a;
+  color: #e0e0e0;
 }
 
 #app {
@@ -168,362 +79,204 @@ body {
   flex-direction: column;
 }
 
-/* Header Styles */
-.header {
-  background: var(--color-header-bg);
-  color: var(--color-header-text);
-  box-shadow: 0 2px 8px var(--color-shadow);
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  transition: background-color var(--transition-normal);
+header {
+  background: #2c3e50;
+  color: white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.header-content {
+.dark header {
+  background: #111;
+}
+
+.container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: var(--spacing-md) var(--spacing-xl);
+  padding: 1rem 2rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-}
-
-.logo-icon {
-  width: 2rem;
-  height: 2rem;
-  color: var(--color-header-accent);
-}
-
 .logo h1 {
   font-size: 1.5rem;
   font-weight: 600;
-  color: var(--color-header-text);
 }
 
-.nav {
+nav {
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
+  gap: 1rem;
 }
 
-.nav-link {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  color: var(--color-header-text);
+nav a {
+  color: white;
   text-decoration: none;
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--radius-md);
-  transition: all var(--transition-normal);
-  font-weight: 500;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  transition: background 0.2s;
 }
 
-.nav-link:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  transform: translateY(-1px);
+nav a:hover {
+  background: rgba(255,255,255,0.1);
 }
 
-.nav-icon {
-  width: 1.2rem;
-  height: 1.2rem;
-}
-
-.theme-toggle {
+.theme-btn {
   background: none;
   border: none;
-  color: var(--color-header-text);
-  padding: var(--spacing-sm);
-  border-radius: var(--radius-md);
+  color: white;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
   cursor: pointer;
-  transition: all var(--transition-normal);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  font-size: 1.2rem;
+  transition: background 0.2s;
 }
 
-.theme-toggle:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  transform: rotate(15deg);
+.theme-btn:hover {
+  background: rgba(255,255,255,0.1);
 }
 
-.theme-icon {
-  width: 1.5rem;
-  height: 1.5rem;
-}
-
-/* Main Content */
-.main {
+main {
   flex: 1;
-  padding: var(--spacing-xl);
+  padding: 2rem;
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
 }
 
-/* Card Styles */
 .card {
-  background: var(--color-bg-primary);
-  border-radius: var(--radius-lg);
-  padding: var(--spacing-lg);
-  margin-bottom: var(--spacing-md);
-  box-shadow: 0 4px 12px var(--color-shadow-light);
-  border: 1px solid var(--color-border-light);
-  transition: all var(--transition-normal);
+  background: white;
+  border-radius: 0.5rem;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px var(--color-shadow);
+.dark .card {
+  background: #2a2a2a;
 }
 
-/* Button Styles */
 .btn {
-  background: var(--color-btn-primary);
-  color: var(--color-text-inverse);
+  background: #3498db;
+  color: white;
   border: none;
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--radius-md);
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
   cursor: pointer;
   text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  margin-right: var(--spacing-sm);
-  margin-bottom: var(--spacing-sm);
-  font-weight: 500;
+  display: inline-block;
   font-size: 0.875rem;
-  transition: all var(--transition-normal);
-  position: relative;
-  overflow: hidden;
+  transition: background 0.2s;
+  margin: 0.25rem;
 }
 
 .btn:hover {
-  background: var(--color-btn-primary-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px var(--color-shadow);
-}
-
-.btn:active {
-  transform: translateY(0);
+  background: #2980b9;
 }
 
 .btn-danger {
-  background: var(--color-btn-danger);
+  background: #e74c3c;
 }
 
 .btn-danger:hover {
-  background: var(--color-btn-danger-hover);
+  background: #c0392b;
 }
 
 .btn-secondary {
-  background: var(--color-btn-secondary);
+  background: #95a5a6;
 }
 
 .btn-secondary:hover {
-  background: var(--color-btn-secondary-hover);
+  background: #7f8c8d;
 }
 
-.btn-warning {
-  background: var(--color-btn-warning);
-  color: var(--color-text-primary);
-}
-
-.btn-warning:hover {
-  background: var(--color-btn-warning-hover);
-}
-
-/* Table Styles */
 .table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: var(--spacing-md);
-  background: var(--color-bg-primary);
-  border-radius: var(--radius-lg);
+  background: white;
+  border-radius: 0.5rem;
   overflow: hidden;
-  box-shadow: 0 2px 8px var(--color-shadow-light);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.table th,
-.table td {
-  padding: var(--spacing-md);
+.dark .table {
+  background: #2a2a2a;
+}
+
+.table th, .table td {
+  padding: 1rem;
   text-align: left;
-  border-bottom: 1px solid var(--color-border-light);
+  border-bottom: 1px solid #eee;
+}
+
+.dark .table th, .dark .table td {
+  border-bottom: 1px solid #444;
 }
 
 .table th {
-  background-color: var(--color-bg-secondary);
+  background: #f8f9fa;
   font-weight: 600;
-  color: var(--color-text-primary);
-  font-size: 0.875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
-.table tbody tr {
-  transition: background-color var(--transition-fast);
+.dark .table th {
+  background: #333;
 }
 
 .table tbody tr:hover {
-  background-color: var(--color-bg-secondary);
+  background: #f8f9fa;
 }
 
-.table tbody tr:last-child td {
-  border-bottom: none;
+.dark .table tbody tr:hover {
+  background: #333;
 }
 
-/* Status Styles */
-.status-active {
-  color: var(--color-success);
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-}
-
-.status-inactive {
-  color: var(--color-danger);
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-}
-
-.status-active::before,
-.status-inactive::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: currentColor;
-}
-
-/* Loading and Error States */
 .loading {
   text-align: center;
-  padding: var(--spacing-xxl);
-  color: var(--color-text-secondary);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--spacing-md);
+  padding: 3rem;
+  color: #666;
 }
 
 .loading::before {
   content: '';
+  display: block;
   width: 2rem;
   height: 2rem;
-  border: 2px solid var(--color-border);
-  border-top: 2px solid var(--color-btn-primary);
+  border: 2px solid #ddd;
+  border-top: 2px solid #3498db;
   border-radius: 50%;
   animation: spin 1s linear infinite;
+  margin: 0 auto 1rem;
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  to { transform: rotate(360deg); }
 }
 
 .error {
-  background: rgba(220, 53, 69, 0.1);
-  color: var(--color-danger);
-  padding: var(--spacing-md);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--spacing-md);
-  border: 1px solid rgba(220, 53, 69, 0.2);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
+  background: #fee;
+  color: #c00;
+  padding: 1rem;
+  border-radius: 0.25rem;
+  margin: 1rem 0;
+  border: 1px solid #fcc;
 }
 
-.error::before {
-  content: '⚠';
-  font-size: 1.2rem;
-}
-
-/* Breadcrumb */
-.breadcrumb {
-  margin-bottom: var(--spacing-md);
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-}
-
-.breadcrumb a {
-  color: var(--color-btn-primary);
-  text-decoration: none;
-  transition: color var(--transition-fast);
-}
-
-.breadcrumb a:hover {
-  color: var(--color-btn-primary-hover);
-  text-decoration: underline;
-}
-
-/* Responsive Design */
 @media (max-width: 768px) {
-  .header-content {
-    padding: var(--spacing-md);
+  .container {
     flex-direction: column;
-    gap: var(--spacing-md);
+    gap: 1rem;
   }
   
-  .logo h1 {
-    font-size: 1.25rem;
-  }
-  
-  .main {
-    padding: var(--spacing-md);
+  main {
+    padding: 1rem;
   }
   
   .table {
     font-size: 0.875rem;
   }
   
-  .table th,
-  .table td {
-    padding: var(--spacing-sm);
+  .table th, .table td {
+    padding: 0.5rem;
   }
-}
-
-@media (max-width: 480px) {
-  .nav {
-    flex-direction: column;
-    width: 100%;
-  }
-  
-  .card {
-    padding: var(--spacing-md);
-  }
-  
-  .btn {
-    font-size: 0.75rem;
-    padding: var(--spacing-xs) var(--spacing-sm);
-  }
-}
-
-/* Dark theme specific adjustments */
-.dark-theme .table tbody tr:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-.dark-theme .nav-link:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-}
-
-.dark-theme .theme-toggle:hover {
-  background-color: rgba(255, 255, 255, 0.1);
 }
 </style>

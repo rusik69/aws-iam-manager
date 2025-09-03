@@ -1,46 +1,14 @@
 <template>
-  <div class="user-detail-container">
-    <header class="page-header">
-      <div class="header-content">
-        <div class="breadcrumb">
-          <router-link to="/" class="breadcrumb-link">
-            <svg class="breadcrumb-icon" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/>
-            </svg>
-            Accounts
-          </router-link>
-          <svg class="breadcrumb-separator" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
-          </svg>
-          <router-link :to="`/accounts/${accountId}/users`" class="breadcrumb-link">
-            {{ accountId }}
-          </router-link>
-          <svg class="breadcrumb-separator" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
-          </svg>
-          <span class="breadcrumb-current">{{ username }}</span>
-        </div>
-        <div class="header-text">
-          <div class="header-icon">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L15 1H5C3.89 1 3 1.89 3 3V18A2 2 0 0 0 5 20H11V18H5V3H13V9H21Z"/>
-            </svg>
-          </div>
-          <div>
-            <h2>User Details</h2>
-            <p>Manage {{ username }}'s access keys and permissions</p>
-          </div>
-        </div>
-      </div>
-      <div class="header-actions" v-if="!loading && !error">
-        <button @click="refreshUser" class="btn btn-secondary">
-          <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
-          </svg>
-          Refresh
-        </button>
-      </div>
-    </header>
+  <div>
+    <div class="card">
+      <nav>
+        <router-link to="/">← Accounts</router-link> / 
+        <router-link :to="`/accounts/${accountId}/users`">{{ accountId }}</router-link> / 
+        {{ username }}
+      </nav>
+      <h2>User Details: {{ username }}</h2>
+      <button @click="refreshUser" class="btn btn-secondary">Refresh</button>
+    </div>
 
     <div v-if="loading" class="loading">
       <span>Loading user details...</span>
@@ -338,7 +306,7 @@ export default {
       if (navigator.clipboard) {
         navigator.clipboard.writeText(text).then(() => {
           // Could add a toast notification here
-          console.log('Copied to clipboard')
+          // Successfully copied to clipboard
         })
       } else {
         // Fallback for older browsers

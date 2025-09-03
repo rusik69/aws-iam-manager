@@ -48,7 +48,7 @@ describe('App.vue', () => {
         }
       }
     })
-    expect(wrapper.find('.header').exists()).toBe(true)
+    expect(wrapper.find('header').exists()).toBe(true)
     expect(wrapper.find('nav').exists()).toBe(true)
   })
 
@@ -61,7 +61,7 @@ describe('App.vue', () => {
         }
       }
     })
-    expect(wrapper.find('.main').exists()).toBe(true)
+    expect(wrapper.find('main').exists()).toBe(true)
   })
 
   it('renders router-view for content', () => {
@@ -101,8 +101,8 @@ describe('App.vue', () => {
       }
     })
     expect(wrapper.find('#app').exists()).toBe(true)
-    expect(wrapper.find('.header').classes()).toContain('header')
-    expect(wrapper.find('.main').classes()).toContain('main')
+    expect(wrapper.find('header').exists()).toBe(true)
+    expect(wrapper.find('main').exists()).toBe(true)
   })
 
   it('has proper component hierarchy', () => {
@@ -116,7 +116,7 @@ describe('App.vue', () => {
     })
     
     // Check that main components are properly nested
-    expect(wrapper.find('#app .header h1').exists()).toBe(true)
-    expect(wrapper.find('#app .main').exists()).toBe(true)
+    expect(wrapper.find('#app header h1').exists()).toBe(true)
+    expect(wrapper.find('#app main').exists()).toBe(true)
   })
 })

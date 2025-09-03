@@ -3,12 +3,7 @@ package services
 
 import (
 	"fmt"
-	"log"
 	"os"
-	"time"
-
-	"aws-iam-manager/internal/models"
-	"aws-iam-manager/pkg/config"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -16,6 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/sts"
+
+	"aws-iam-manager/internal/models"
+	"aws-iam-manager/pkg/config"
 )
 
 type AWSService struct {
@@ -32,31 +30,14 @@ func NewAWSService(cfg *config.Config) *AWSService {
 		region = "us-east-1"
 	}
 
-	log.Printf("[INFO] Initializing AWS service with region: %s", region)
-	
-	// Log whether credentials are set (but not the actual values)
-	if accessKey == "" {
-		log.Printf("[WARN] AWS_ACCESS_KEY_ID is not set")
-	} else {
-		log.Printf("[INFO] AWS_ACCESS_KEY_ID is set (length: %d)", len(accessKey))
-	}
-	
-	if secretKey == "" {
-		log.Printf("[WARN] AWS_SECRET_ACCESS_KEY is not set")
-	} else {
-		log.Printf("[INFO] AWS_SECRET_ACCESS_KEY is set (length: %d)", len(secretKey))
-	}
-
 	sess, err := session.NewSession(&aws.Config{
 		Region:      aws.String(region),
 		Credentials: credentials.NewStaticCredentials(accessKey, secretKey, ""),
 	})
 	if err != nil {
-		log.Printf("[ERROR] Failed to create AWS session: %v", err)
 		panic(fmt.Sprintf("Failed to create AWS session: %v", err))
 	}
 
-	log.Printf("[INFO] AWS service initialized successfully with role name: %s", cfg.RoleName)
 	return &AWSService{
 		masterSession: sess,
 		config:        cfg,
@@ -64,16 +45,12 @@ func NewAWSService(cfg *config.Config) *AWSService {
 }
 
 func (s *AWSService) getSessionForAccount(accountID string) (*session.Session, error) {
-	start := time.Now()
 	if accountID == "" {
-		log.Printf("[DEBUG] Using master session (no account ID provided)")
 		return s.masterSession, nil
 	}
 
-	log.Printf("[DEBUG] Assuming role for account: %s", accountID)
 	stsClient := sts.New(s.masterSession)
 	roleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s", accountID, s.config.RoleName)
-	log.Printf("[DEBUG] Role ARN: %s", roleArn)
 
 	result, err := stsClient.AssumeRole(&sts.AssumeRoleInput{
 		RoleArn:         aws.String(roleArn),
@@ -81,7 +58,6 @@ func (s *AWSService) getSessionForAccount(accountID string) (*session.Session, e
 		DurationSeconds: aws.Int64(3600),
 	})
 	if err != nil {
-		log.Printf("[ERROR] Failed to assume role %s: %v (took %v)", roleArn, err, time.Since(start))
 		return nil, fmt.Errorf("failed to assume role: %v", err)
 	}
 
@@ -95,23 +71,16 @@ func (s *AWSService) getSessionForAccount(accountID string) (*session.Session, e
 		),
 	})
 	if err != nil {
-		log.Printf("[ERROR] Failed to create session with assumed role: %v (took %v)", err, time.Since(start))
 		return nil, fmt.Errorf("failed to create session with assumed role: %v", err)
 	}
 
-	log.Printf("[DEBUG] Successfully assumed role for account %s (took %v)", accountID, time.Since(start))
 	return sess, nil
 }
 
 func (s *AWSService) ListAccounts() ([]models.Account, error) {
-	start := time.Now()
-	log.Printf("[DEBUG] Starting ListAccounts operation")
-	
 	orgClient := organizations.New(s.masterSession)
-
 	result, err := orgClient.ListAccounts(&organizations.ListAccountsInput{})
 	if err != nil {
-		log.Printf("[ERROR] AWS Organizations ListAccounts failed: %v (took %v)", err, time.Since(start))
 		return nil, err
 	}
 
@@ -123,28 +92,21 @@ func (s *AWSService) ListAccounts() ([]models.Account, error) {
 		})
 	}
 
-	log.Printf("[DEBUG] ListAccounts completed: found %d accounts (took %v)", len(accounts), time.Since(start))
 	return accounts, nil
 }
 
 func (s *AWSService) ListUsers(accountID string) ([]models.User, error) {
-	start := time.Now()
-	log.Printf("[DEBUG] Starting ListUsers for account: %s", accountID)
-	
 	sess, err := s.getSessionForAccount(accountID)
 	if err != nil {
-		log.Printf("[ERROR] Failed to get session for account %s: %v (took %v)", accountID, err, time.Since(start))
 		return nil, err
 	}
 
 	iamClient := iam.New(sess)
 	result, err := iamClient.ListUsers(&iam.ListUsersInput{})
 	if err != nil {
-		log.Printf("[ERROR] AWS IAM ListUsers failed for account %s: %v (took %v)", accountID, err, time.Since(start))
 		return nil, err
 	}
 
-	log.Printf("[DEBUG] Found %d users in account %s, processing details...", len(result.Users), accountID)
 	var users []models.User
 	for _, user := range result.Users {
 		// Check if user has password
@@ -154,8 +116,6 @@ func (s *AWSService) ListUsers(accountID string) ([]models.User, error) {
 		})
 		if err == nil {
 			passwordSet = true
-		} else {
-			log.Printf("[DEBUG] User %s in account %s has no login profile", *user.UserName, accountID)
 		}
 
 		// Get access keys
@@ -171,9 +131,6 @@ func (s *AWSService) ListUsers(accountID string) ([]models.User, error) {
 					CreateDate:  *key.CreateDate,
 				})
 			}
-			log.Printf("[DEBUG] User %s in account %s has %d access keys", *user.UserName, accountID, len(accessKeys))
-		} else {
-			log.Printf("[WARN] Failed to get access keys for user %s in account %s: %v", *user.UserName, accountID, err)
 		}
 
 		users = append(users, models.User{
@@ -186,7 +143,6 @@ func (s *AWSService) ListUsers(accountID string) ([]models.User, error) {
 		})
 	}
 
-	log.Printf("[DEBUG] ListUsers completed for account %s: processed %d users (took %v)", accountID, len(users), time.Since(start))
 	return users, nil
 }
 

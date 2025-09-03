@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"aws-iam-manager/internal/models"
-
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+
+	"aws-iam-manager/internal/models"
 )
 
 // Mock AWS service for testing

@@ -10,10 +10,10 @@ import (
 func main() {
 	log.Printf("[INFO] Starting AWS IAM Manager server...")
 	log.Printf("[INFO] Application version: v1.0.0")
-	
+
 	cfg := config.Load()
 	log.Printf("[INFO] Configuration loaded successfully")
-	
+
 	srv := server.New(cfg)
 	log.Printf("[INFO] Server instance created")
 

@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"aws-iam-manager/internal/models"
-
 	"github.com/stretchr/testify/assert"
+
+	"aws-iam-manager/internal/models"
 )
 
 func TestModelsCreation(t *testing.T) {
