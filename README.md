@@ -35,17 +35,20 @@ A web application for managing IAM users across multiple AWS accounts in an orga
 
 ## Quick Start
 
-### Option 1: Automated User Setup (Recommended)
+### Option 1: Go CLI (Recommended)
 
-Use the automated script to create an IAM user with all necessary permissions:
+Use the modern Go CLI for better performance and reliability:
 
 ```bash
 # Clone and navigate to the project
 git clone <repository-url>
 cd aws-iam-manager
 
+# Build the CLI (requires Go 1.21+)
+./build-cli.sh
+
 # Deploy IAM user with required permissions
-./scripts/deploy-iam-user.sh
+./bin/iam-manager deploy
 
 # Use the displayed credentials to create your .env file
 cp .env.example .env
@@ -87,7 +90,7 @@ cp .env.example .env
 Use the deployment script to automatically create an IAM user with all required permissions:
 
 ```bash
-./scripts/deploy-iam-user.sh
+./scripts/iam-manager.sh deploy
 ```
 
 This script will:

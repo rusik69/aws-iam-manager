@@ -2,10 +2,7 @@
 package server
 
 import (
-	"embed"
 	"fmt"
-	"io"
-	"io/fs"
 	"log"
 	"net/http"
 
@@ -17,8 +14,8 @@ import (
 	"aws-iam-manager/pkg/config"
 )
 
-//go:embed frontend/dist/*
-var frontendFS embed.FS
+// Frontend files are served from filesystem
+// TODO: Add embed support for production builds
 
 type Server struct {
 	config  *config.Config
@@ -58,29 +55,14 @@ func (s *Server) SetupRoutes() *gin.Engine {
 }
 
 func (s *Server) setupFrontendRoutes(r *gin.Engine) {
-	frontendSubFS, err := fs.Sub(frontendFS, "frontend/dist")
-	if err != nil {
-		log.Printf("Warning: Failed to create frontend sub filesystem: %v", err)
-		return
-	}
+	log.Printf("[INFO] Serving frontend files from ../frontend/dist/")
 
-	r.StaticFS("/assets", http.FS(frontendSubFS))
+	// Serve static assets
+	r.Static("/assets", "../frontend/dist/assets")
 
 	// Serve index.html for root and SPA routes
 	indexHandler := func(c *gin.Context) {
-		file, err := frontendSubFS.Open("index.html")
-		if err != nil {
-			c.String(http.StatusInternalServerError, "Error opening index.html: %v", err)
-			return
-		}
-		defer file.Close()
-
-		data, err := io.ReadAll(file)
-		if err != nil {
-			c.String(http.StatusInternalServerError, "Error reading index.html: %v", err)
-			return
-		}
-		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+		c.File("../frontend/dist/index.html")
 	}
 
 	r.GET("/", indexHandler)

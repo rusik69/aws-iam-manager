@@ -5,7 +5,7 @@
 ### Step 1: Create IAM User (Automated)
 Create an IAM user with all required permissions:
 ```bash
-./scripts/deploy-iam-user.sh
+./scripts/iam-manager.sh deploy
 ```
 
 ### Step 2: Deploy Roles 
@@ -26,7 +26,7 @@ Deploy IAM roles across all AWS Organization accounts to enable cross-account IA
 
 1. **AWS Organizations** enabled with all target accounts
 2. **IAM user** with StackSet deployment permissions:
-   - **Automated**: Run `./scripts/deploy-iam-user.sh` to create user with all required permissions
+   - **Automated**: Run `./scripts/iam-manager.sh deploy` to create user with all required permissions
    - **Manual**: See [REQUIRED_PERMISSIONS.md](docs/REQUIRED_PERMISSIONS.md) for detailed setup
 3. **Trusted access** enabled for CloudFormation StackSets (automatically handled by the script)
 

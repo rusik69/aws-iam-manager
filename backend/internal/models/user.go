@@ -25,4 +25,3 @@ type AccessKey struct {
 	Status      string    `json:"status"`
 	CreateDate  time.Time `json:"create_date"`
 }
-
