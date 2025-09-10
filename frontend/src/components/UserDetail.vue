@@ -2,19 +2,31 @@
   <div>
     <div class="card">
       <nav>
-        <router-link to="/">← Accounts</router-link> / 
-        <router-link :to="`/accounts/${accountId}/users`">{{ accountId }}</router-link> / 
+        <router-link to="/">← All Users</router-link> / 
         {{ username }}
       </nav>
       <h2>User Details: {{ username }}</h2>
-      <button @click="refreshUser" class="btn btn-secondary">Refresh</button>
+      <div class="header-actions">
+        <button @click="refreshUser" class="btn btn-secondary">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+          </svg>
+          Refresh
+        </button>
+        <button @click="deleteUser" class="btn btn-danger" :disabled="deletingUser">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+          {{ deletingUser ? 'Deleting...' : 'Delete User' }}
+        </button>
+      </div>
     </div>
 
     <div v-if="loading" class="loading">
       <span>Loading user details...</span>
     </div>
     <div v-else-if="error" class="error">{{ error }}</div>
-    <div v-else class="content-grid">
+    <div v-else-if="user" class="content-grid">
       <!-- User Information Card -->
       <div class="info-card">
         <div class="card-header">
@@ -27,12 +39,12 @@
             <h3>User Information</h3>
           </div>
           <div class="user-status">
-            <span :class="['status-badge', user.password_set ? 'status-success' : 'status-warning']">
+            <span :class="['status-badge', user?.password_set ? 'status-success' : 'status-warning']">
               <svg class="status-icon" viewBox="0 0 24 24" fill="currentColor">
-                <path v-if="user.password_set" d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+                <path v-if="user?.password_set" d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
                 <path v-else d="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z"/>
               </svg>
-              {{ user.password_set ? 'Password Set' : 'No Password' }}
+              {{ user?.password_set ? 'Password Set' : 'No Password' }}
             </span>
           </div>
         </div>
@@ -40,24 +52,24 @@
           <div class="info-grid">
             <div class="info-item">
               <div class="info-label">Username</div>
-              <div class="info-value user-name">{{ user.username }}</div>
+              <div class="info-value user-name">{{ user?.username || 'N/A' }}</div>
             </div>
             <div class="info-item">
               <div class="info-label">User ID</div>
               <div class="info-value">
-                <code class="user-id">{{ user.user_id }}</code>
+                <code class="user-id">{{ user?.user_id || 'N/A' }}</code>
               </div>
             </div>
             <div class="info-item full-width">
               <div class="info-label">ARN</div>
               <div class="info-value">
-                <code class="arn">{{ user.arn }}</code>
+                <code class="arn">{{ user?.arn || 'N/A' }}</code>
               </div>
             </div>
             <div class="info-item">
               <div class="info-label">Created</div>
               <div class="info-value">
-                <div class="date-display">
+                <div class="date-display" v-if="user?.create_date">
                   <span class="date-value">{{ formatDate(user.create_date) }}</span>
                   <span class="date-relative">{{ formatRelativeDate(user.create_date) }}</span>
                 </div>
@@ -67,8 +79,8 @@
               <div class="info-label">Access Keys</div>
               <div class="info-value">
                 <div class="key-count">
-                  <span class="count-number">{{ user.access_keys.length }}</span>
-                  <span class="count-label">{{ user.access_keys.length === 1 ? 'key' : 'keys' }}</span>
+                  <span class="count-number">{{ user.access_keys?.length || 0 }}</span>
+                  <span class="count-label">{{ (user.access_keys?.length || 0) === 1 ? 'key' : 'keys' }}</span>
                 </div>
               </div>
             </div>
@@ -97,7 +109,7 @@
           </div>
         </div>
         <div class="card-body">
-          <div v-if="user.access_keys.length === 0" class="empty-keys">
+          <div v-if="(user.access_keys?.length || 0) === 0" class="empty-keys">
             <div class="empty-icon">
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <path d="M7 14C5.9 14 5 13.1 5 12S5.9 10 7 10 9 10.9 9 12 8.1 14 7 14M12.6 10C11.8 7.7 9.6 6 7 6C3.7 6 1 8.7 1 12S3.7 18 7 18C9.6 18 11.8 16.3 12.6 14H16L17.5 15.5L19 14L17.5 12.5L19 11L17.5 9.5L16 11H12.6Z"/>
@@ -107,7 +119,7 @@
             <p>This user doesn't have any access keys yet. Create one to enable programmatic access.</p>
           </div>
           <div v-else class="keys-list">
-            <div v-for="key in user.access_keys" :key="key.access_key_id" class="key-item">
+            <div v-for="key in (user.access_keys || [])" :key="key.access_key_id" class="key-item">
               <div class="key-header">
                 <div class="key-info">
                   <div class="key-id">
@@ -222,7 +234,8 @@ export default {
       loading: true,
       error: null,
       creatingKey: false,
-      newKey: null
+      newKey: null,
+      deletingUser: false
     }
   },
   async mounted() {
@@ -302,6 +315,30 @@ export default {
       if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`
       return `${Math.floor(diffDays / 365)} years ago`
     },
+    async deleteUser() {
+      const confirmMessage = `Are you sure you want to DELETE the user "${this.username}"?\n\nThis will:\n1. Delete all access keys for this user\n2. Delete the user's login profile (if exists)\n3. Permanently delete the user\n\nThis action cannot be undone!`
+      
+      if (!confirm(confirmMessage)) return
+      
+      // Second confirmation for safety
+      const finalConfirmation = confirm(`FINAL CONFIRMATION:\nType "DELETE" to confirm deletion of user "${this.username}"`)
+      if (!finalConfirmation) return
+      
+      this.deletingUser = true
+      
+      try {
+        await axios.delete(`/api/accounts/${this.accountId}/users/${this.username}`)
+        alert(`User "${this.username}" has been successfully deleted.`)
+        // Navigate back to main page
+        this.$router.push('/')
+      } catch (error) {
+        console.error('Failed to delete user:', error)
+        alert(error.response?.data?.error || 'Failed to delete user. Please try again.')
+      } finally {
+        this.deletingUser = false
+      }
+    },
+    
     copyToClipboard(text) {
       if (navigator.clipboard) {
         navigator.clipboard.writeText(text).then(() => {
@@ -330,6 +367,12 @@ export default {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.header-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing);
 }
 
 /* Page Header */

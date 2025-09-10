@@ -1,4 +1,4 @@
-.PHONY: up down build rebuild logs shell clean stop restart status install-compose build-frontend build-backend build-cli dev-cli test fmt lint install check install-linter tidy deps dev preview clean-build ci pre-commit build-prod build-release release help
+.PHONY: up down build rebuild logs shell clean stop restart status install-compose build-frontend build-backend build-cli dev-cli test fmt lint install check install-linter tidy deps dev preview clean-build ci pre-commit build-prod build-release release help deploy-user remove-user create-role remove-role deploy-stackset status-stackset delete-stackset cli-status check-aws-config
 
 # Docker compose command (try docker-compose first, fallback to docker compose)
 DOCKER_COMPOSE := $(shell command -v docker-compose 2> /dev/null || echo "docker compose")
@@ -38,15 +38,25 @@ help:
 	@echo "  restart          - Restart services"
 	@echo "  status           - Show service status"
 	@echo ""
+	@echo "☁️  AWS IAM Management:"
+	@echo "  deploy-user      - Deploy IAM user and resources"
+	@echo "  remove-user      - Remove IAM user and resources"
+	@echo "  create-role      - Create IAM role for cross-account access"
+	@echo "  remove-role      - Remove IAM role and resources"
+	@echo "  deploy-stackset  - Deploy StackSet for organization setup"
+	@echo "  status-stackset  - Show StackSet deployment status"
+	@echo "  delete-stackset  - Delete StackSet and all instances"
+	@echo "  cli-status       - Show current deployment status"
+	@echo ""
 	@echo "🧹 Cleanup:"
 	@echo "  clean            - Clean everything"
 	@echo "  clean-build      - Clean build artifacts only"
 	@echo ""
-	@echo "📦 CLI Usage Examples:"
+	@echo "🔧 Setup & Configuration:"
+	@echo "  check-aws-config - Verify AWS credentials and configuration"
+	@echo ""
+	@echo "📖 CLI Usage Examples:"
 	@echo "  cli-help         - Show CLI help"
-	@echo "  cli-deploy       - Run CLI deploy command"
-	@echo "  cli-status       - Run CLI status command"
-	@echo "  cli-stackset-deploy - Run CLI stackset deploy"
 
 # ============================================================================
 # BUILD TARGETS
@@ -269,32 +279,146 @@ status:
 # CLI USAGE EXAMPLES
 # ============================================================================
 
-cli-help:
-	@if command -v go >/dev/null 2>&1; then \
+cli-help: build-cli
+	@echo "📖 Showing CLI help..."
+	@if [ -f bin/iam-manager ]; then \
+		./bin/iam-manager --help; \
+	elif command -v go >/dev/null 2>&1; then \
 		go run ./cmd/iam-manager --help; \
 	else \
-		echo "❌ Go not installed. Use ./build-cli.sh first, then ./bin/iam-manager --help"; \
+		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
+		exit 1; \
 	fi
 
-cli-deploy:
-	@if command -v go >/dev/null 2>&1; then \
+# ============================================================================
+# SETUP & CONFIGURATION TARGETS
+# ============================================================================
+
+# Check AWS credentials and configuration
+check-aws-config:
+	@echo "🔍 Checking AWS configuration..."
+	@echo ""
+	@echo "📋 AWS CLI Configuration:"
+	@aws configure list || echo "❌ AWS CLI not configured"
+	@echo ""
+	@echo "🌍 Environment Variables:"
+	@echo "  AWS_REGION: $${AWS_REGION:-<not set>}"
+	@echo "  AWS_ACCESS_KEY_ID: $${AWS_ACCESS_KEY_ID:-<not set>}"
+	@echo "  AWS_SECRET_ACCESS_KEY: $${AWS_SECRET_ACCESS_KEY:+<set>}$${AWS_SECRET_ACCESS_KEY:-<not set>}"
+	@echo ""
+	@echo "💡 Quick Setup Guide:"
+	@echo "   1. Configure AWS CLI: aws configure"
+	@echo "   2. Or set environment variables:"
+	@echo "      export AWS_ACCESS_KEY_ID=your_key"
+	@echo "      export AWS_SECRET_ACCESS_KEY=your_secret" 
+	@echo "      export AWS_REGION=us-east-1"
+	@echo "   3. Or copy .env.example to .env and set your credentials"
+	@echo ""
+	@echo "🧪 Testing AWS connectivity..."
+	@if command -v aws >/dev/null 2>&1; then \
+		aws sts get-caller-identity 2>/dev/null || echo "❌ AWS connectivity test failed - credentials may be invalid"; \
+	else \
+		echo "⚠️  AWS CLI not installed - install it for easier credential management"; \
+	fi
+
+# ============================================================================
+# AWS IAM MANAGEMENT TARGETS
+# ============================================================================
+
+# Deploy IAM user and resources
+deploy-user: build-cli
+	@echo "🚀 Deploying IAM user and resources..."
+	@if [ -f bin/iam-manager ]; then \
+		./bin/iam-manager deploy; \
+	elif command -v go >/dev/null 2>&1; then \
 		go run ./cmd/iam-manager deploy; \
 	else \
-		echo "❌ Go not installed. Use ./build-cli.sh first, then ./bin/iam-manager deploy"; \
+		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
+		exit 1; \
 	fi
 
-cli-status:
-	@if command -v go >/dev/null 2>&1; then \
-		go run ./cmd/iam-manager status; \
+# Remove IAM user and resources
+remove-user: build-cli
+	@echo "🗑️  Removing IAM user and resources..."
+	@if [ -f bin/iam-manager ]; then \
+		./bin/iam-manager remove; \
+	elif command -v go >/dev/null 2>&1; then \
+		go run ./cmd/iam-manager remove; \
 	else \
-		echo "❌ Go not installed. Use ./build-cli.sh first, then ./bin/iam-manager status"; \
+		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
+		exit 1; \
 	fi
 
-cli-stackset-deploy:
-	@if command -v go >/dev/null 2>&1; then \
+# Create IAM role for cross-account access
+create-role: build-cli
+	@echo "🔐 Creating IAM role for cross-account access..."
+	@if [ -f bin/iam-manager ]; then \
+		./bin/iam-manager create-role; \
+	elif command -v go >/dev/null 2>&1; then \
+		go run ./cmd/iam-manager create-role; \
+	else \
+		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
+		exit 1; \
+	fi
+
+# Remove IAM role and resources
+remove-role: build-cli
+	@echo "🗑️  Removing IAM role and resources..."
+	@if [ -f bin/iam-manager ]; then \
+		./bin/iam-manager remove-role; \
+	elif command -v go >/dev/null 2>&1; then \
+		go run ./cmd/iam-manager remove-role; \
+	else \
+		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
+		exit 1; \
+	fi
+
+# Deploy StackSet for organization setup
+deploy-stackset: build-cli
+	@echo "📦 Deploying StackSet for organization setup..."
+	@if [ -f bin/iam-manager ]; then \
+		./bin/iam-manager stackset-deploy; \
+	elif command -v go >/dev/null 2>&1; then \
 		go run ./cmd/iam-manager stackset-deploy; \
 	else \
-		echo "❌ Go not installed. Use ./build-cli.sh first, then ./bin/iam-manager stackset-deploy"; \
+		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
+		exit 1; \
+	fi
+
+# Show StackSet deployment status
+status-stackset: build-cli
+	@echo "📊 Checking StackSet deployment status..."
+	@if [ -f bin/iam-manager ]; then \
+		./bin/iam-manager stackset-status; \
+	elif command -v go >/dev/null 2>&1; then \
+		go run ./cmd/iam-manager stackset-status; \
+	else \
+		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
+		exit 1; \
+	fi
+
+# Delete StackSet and all instances
+delete-stackset: build-cli
+	@echo "🗑️  Deleting StackSet and all instances..."
+	@if [ -f bin/iam-manager ]; then \
+		./bin/iam-manager stackset-delete; \
+	elif command -v go >/dev/null 2>&1; then \
+		go run ./cmd/iam-manager stackset-delete; \
+	else \
+		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
+		exit 1; \
+	fi
+
+# Show current deployment status
+cli-status: build-cli
+	@echo "📋 Showing current deployment status..."
+	@if [ -f bin/iam-manager ]; then \
+		./bin/iam-manager status; \
+	elif command -v go >/dev/null 2>&1; then \
+		go run ./cmd/iam-manager status; \
+	else \
+		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
+		exit 1; \
 	fi
 
 # ============================================================================

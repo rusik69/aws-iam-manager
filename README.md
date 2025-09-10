@@ -1,118 +1,155 @@
 # AWS IAM Manager
 
-A web application for managing IAM users across multiple AWS accounts in an organization. Features a built-in StackSet deployment system for automated role provisioning. Built with Go backend and Vue.js frontend, served through Go to eliminate Node.js dependency.
+A comprehensive web application for managing IAM users across multiple AWS accounts in an organization. Features automated StackSet deployment, cross-account role management, and a modern web interface. Built with Go backend and Vue.js frontend with Docker support.
 
-## Features
+## ✨ Features
 
-- **Multi-Account Management**: Switch between AWS accounts using cross-account roles
-- **User Listing**: View all IAM users across organization accounts
-- **Access Key Management**: Create, rotate, and delete access keys
-- **Password Status**: Check if users have console passwords set
-- **User Details**: View comprehensive user information including ARN, creation date, and access keys
-- **🆕 StackSet Deployment**: Deploy IAM roles to all organization accounts with one click from the web interface
-- **Permission Validation**: Automatically validate required AWS permissions before deployment
-- **Real-time Monitoring**: Track StackSet deployment progress across all accounts
+### Core Functionality
+- **🏢 Multi-Account Management**: Switch between AWS accounts using cross-account roles
+- **👥 User Management**: View, create, and manage IAM users across organization accounts
+- **🔑 Access Key Management**: Create, rotate, and delete access keys securely
+- **🔒 Password Management**: Check and manage console password status
+- **📊 User Details**: Comprehensive user information including ARN, creation date, and permissions
 
-## Architecture
+### Advanced Features
+- **📦 StackSet Deployment**: Deploy IAM roles to all organization accounts with one click
+- **✅ Permission Validation**: Automatically validate required AWS permissions before deployment
+- **📈 Real-time Monitoring**: Track StackSet deployment progress across all accounts
+- **🌙 Dark/Light Theme**: Modern responsive UI with theme switching
+- **🛡️ Security**: External ID protection and least privilege permissions
 
-- **Backend**: Go with Gin framework and AWS SDK
-- **Frontend**: Vue.js 3 with Vite, compiled and served by Go
+## 🏗️ Architecture
+
+- **Backend**: Go 1.21+ with Gin framework and AWS SDK v2
+- **Frontend**: Vue.js 3 with Vite, compiled and served by Go (no Node.js runtime dependency)
 - **Deployment**: Docker Compose for easy deployment
 - **Authentication**: Uses AWS IAM roles for cross-account access
+- **Security**: External ID validation and proper credential management
 
-## Prerequisites
+## 📋 Prerequisites
 
-1. AWS Organization with multiple accounts
-2. IAM user in master account with permissions to:
+1. **AWS Organization** with multiple accounts
+2. **IAM user** in master account with permissions to:
    - List organization accounts (`organizations:ListAccounts`)
-   - Assume roles in target accounts
-   - **CloudFormation StackSets operations** (required for web-based role deployment)
+   - Assume roles in target accounts (`sts:AssumeRole`)
+   - CloudFormation StackSets operations (for automated role deployment)
    - Organizations service access
-3. `OrganizationAccountAccessRole` (or similar) in each target account **OR** use the built-in StackSet deployment feature
-4. Docker and Docker Compose
+3. **Target account roles** (`OrganizationAccountAccessRole`) **OR** use our automated StackSet deployment
+4. **Docker and Docker Compose** (for containerized deployment)
+5. **Go 1.21+** (for CLI and local development)
 
-> **New Feature:** The application now includes a web-based StackSet deployment interface! You can deploy the required IAM roles to all organization accounts directly from the browser instead of manually creating them. See the [StackSet Deployment](#stackset-deployment) section below.
+## 🚀 Quick Start
 
-## Quick Start
+### Option 1: Automated Setup (Recommended)
 
-### Option 1: Go CLI (Recommended)
-
-Use the modern Go CLI for better performance and reliability:
+Use our modern Go CLI with Makefile targets for the best experience:
 
 ```bash
-# Clone and navigate to the project
-git clone <repository-url>
+# 1. Clone the repository
+git clone https://github.com/rusik69/aws-iam-manager.git
 cd aws-iam-manager
 
-# Build the CLI (requires Go 1.21+)
-./build-cli.sh
+# 2. Check AWS configuration
+make check-aws-config
 
-# Deploy IAM user with required permissions
-./bin/iam-manager deploy
+# 3. Configure AWS credentials (if needed)
+aws configure
+# OR set environment variables:
+# export AWS_ACCESS_KEY_ID=your_key
+# export AWS_SECRET_ACCESS_KEY=your_secret
+# export AWS_REGION=us-east-1
 
-# Use the displayed credentials to create your .env file
-cp .env.example .env
-# Edit .env with the credentials from the script output
+# 4. Deploy IAM user with required permissions
+make deploy-user
+
+# 5. Deploy roles to all organization accounts
+make deploy-stackset
+
+# 6. Check deployment status
+make status-stackset
+
+# 7. Start the web application
+make dev
 ```
 
-### Option 2: Manual Setup
+Access the application at `http://localhost:8080`
 
-1. Clone and navigate to the project:
-   ```bash
-   git clone <repository-url>
-   cd aws-iam-manager
-   ```
-
-2. Copy and configure environment variables:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your AWS credentials
-   ```
-
-3. Build and run with Docker Compose:
-   ```bash
-   docker-compose up --build
-   ```
-
-4. Access the application at `http://localhost:8080`
-
-## Environment Variables
-
-- `AWS_ACCESS_KEY_ID`: Access key for master AWS account
-- `AWS_SECRET_ACCESS_KEY`: Secret key for master AWS account  
-- `AWS_REGION`: AWS region (default: us-east-1)
-- `PORT`: Application port (default: 8080)
-
-## IAM Permissions
-
-### 🚀 Automated Setup (Recommended)
-
-Use the deployment script to automatically create an IAM user with all required permissions:
+### Option 2: Manual Docker Setup
 
 ```bash
-./scripts/iam-manager.sh deploy
+# 1. Clone and configure
+git clone https://github.com/rusik69/aws-iam-manager.git
+cd aws-iam-manager
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your AWS credentials
+
+# 3. Build and run
+docker-compose up --build
 ```
 
-This script will:
-- Create an IAM user named `iam-manager`
-- Attach all required managed policies (IAMFullAccess, CloudFormationFullAccess, AWSOrganizationsReadOnlyAccess)
-- Create a custom policy for additional StackSet permissions
-- Generate access keys and display them securely
-- Enable StackSets trusted access and service-linked role
-- Provide an environment file template
+## ⚙️ Configuration
 
-### Manual Setup
+### Environment Variables
 
-If you prefer to set up permissions manually, the IAM user in the master account needs the following permissions. For the new StackSet deployment feature, additional permissions are required:
+Copy `.env.example` to `.env` and configure:
 
-#### Option 1: Managed Policies (Recommended for StackSet Feature)
-Attach these AWS managed policies to the user:
+```bash
+# Required AWS credentials
+AWS_ACCESS_KEY_ID=your_access_key_here
+AWS_SECRET_ACCESS_KEY=your_secret_key_here
+AWS_REGION=us-east-1
+
+# Optional IAM configuration
+IAM_ROLE_NAME=OrganizationAccountAccessRole
+IAM_USER_NAME=iam-manager
+IAM_POLICY_NAME=IAMManagerCustomPolicy
+STACK_SET_NAME=IAMManagerRoleStackSet
+
+# Application settings
+PORT=8080
+```
+
+## 🛠️ Makefile Targets
+
+### Build & Development
+- `make help` - Show all available targets
+- `make build-frontend` - Build Vue.js frontend
+- `make build-backend` - Build Go backend server
+- `make build-cli` - Build Go CLI application
+- `make dev` - Run Docker development environment
+
+### AWS IAM Management
+- `make deploy-user` - Deploy IAM user and resources
+- `make remove-user` - Remove IAM user and resources
+- `make create-role` - Create IAM role for cross-account access
+- `make remove-role` - Remove IAM role and resources
+- `make deploy-stackset` - Deploy StackSet for organization setup
+- `make status-stackset` - Show StackSet deployment status
+- `make delete-stackset` - Delete StackSet and all instances
+- `make cli-status` - Show current deployment status
+
+### Setup & Configuration
+- `make check-aws-config` - Verify AWS credentials and configuration
+
+### Testing & Quality
+- `make test` - Run all tests
+- `make lint` - Lint all code
+- `make check` - Run all checks (fmt + lint + test)
+
+## 🔐 IAM Permissions
+
+### Master Account User
+
+The CLI deployment script creates an IAM user with these managed policies:
 - `IAMFullAccess` - For IAM user management
-- `CloudFormationFullAccess` - For StackSet operations
+- `CloudFormationFullAccess` - For StackSet operations  
 - `AWSOrganizationsReadOnlyAccess` - For organization account discovery
 
-#### Option 2: Custom Policy (Minimum Permissions)
-Create a custom policy with these minimum permissions:
+### Custom Policy (Minimum Permissions)
+
+If you prefer minimal permissions, create a custom policy:
 
 ```json
 {
@@ -128,7 +165,7 @@ Create a custom policy with these minimum permissions:
             "Resource": "*"
         },
         {
-            "Sid": "AssumeRolePermissions",
+            "Sid": "AssumeRolePermissions", 
             "Effect": "Allow",
             "Action": [
                 "sts:AssumeRole",
@@ -138,16 +175,16 @@ Create a custom policy with these minimum permissions:
         },
         {
             "Sid": "StackSetPermissions",
-            "Effect": "Allow",
+            "Effect": "Allow", 
             "Action": [
                 "cloudformation:CreateStackSet",
-                "cloudformation:UpdateStackSet",
+                "cloudformation:UpdateStackSet", 
                 "cloudformation:DeleteStackSet",
                 "cloudformation:DescribeStackSet",
                 "cloudformation:ListStackSets",
                 "cloudformation:CreateStackInstances",
                 "cloudformation:DeleteStackInstances",
-                "cloudformation:DescribeStackInstance",
+                "cloudformation:DescribeStackInstance", 
                 "cloudformation:ListStackInstances",
                 "cloudformation:DescribeStackSetOperation",
                 "cloudformation:ListStackSetOperations"
@@ -158,114 +195,42 @@ Create a custom policy with these minimum permissions:
 }
 ```
 
-### Target Account Roles
-Each target account should have a role (e.g., `OrganizationAccountAccessRole`) that can be assumed by the master account. You can either attach the `IAMFullAccess` managed policy or create a custom policy:
+## 📦 StackSet Deployment
 
-#### Option 1: Managed Policy (Recommended)
-Attach the AWS managed policy `IAMFullAccess` to the role.
+### Web Interface (Recommended)
 
-#### Option 2: Custom Policy
-Create a custom policy with these minimum permissions:
-
-```json
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "iam:ListUsers",
-                "iam:GetUser",
-                "iam:ListAccessKeys",
-                "iam:CreateAccessKey",
-                "iam:DeleteAccessKey",
-                "iam:GetLoginProfile"
-            ],
-            "Resource": "*"
-        }
-    ]
-}
-```
-
-Trust policy for the role:
-```json
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": "arn:aws:iam::MASTER-ACCOUNT-ID:root"
-            },
-            "Action": "sts:AssumeRole"
-        }
-    ]
-}
-```
-
-## StackSet Deployment
-
-### 🆕 Web-Based Role Deployment
-
-The application now includes a built-in StackSet deployment feature that eliminates the need to manually create IAM roles in each account. You can deploy the required `OrganizationAccountAccessRole` to all organization accounts directly from the web interface.
-
-### How to Use
-
-1. **Start the Application**:
-   ```bash
-   make dev  # or docker-compose up
-   ```
-
-2. **Navigate to StackSet Tab**: 
-   - Open `http://localhost:8080`
-   - Click on the "StackSet" tab in the navigation
-
-3. **Validate Permissions**:
-   - Click "Validate" to check if you have the required permissions
-   - The system will automatically detect your AWS account and user
-
-4. **Deploy StackSet**:
-   - Click "Deploy StackSet" to create IAM roles in all organization accounts
-   - Monitor real-time deployment progress
-   - View per-account deployment status
+1. **Start the application**: `make dev`
+2. **Open browser**: `http://localhost:8080`
+3. **Navigate to StackSet tab**
+4. **Validate permissions** and **deploy with one click**
 
 ### What Gets Deployed
 
-The StackSet creates the following in each target account:
+The StackSet creates in each target account:
 
 - **IAM Role**: `OrganizationAccountAccessRole`
 - **Permissions**: Full IAM access for user management operations
 - **Trust Policy**: Allows your master account user to assume the role
 - **External ID**: Account-specific external ID for security (`{AccountId}-iam-manager`)
+- **Security**: Built-in protection against confused deputy attacks
 
-### Prerequisites for StackSet Deployment
+### CLI Commands
 
-1. **AWS Organizations** with trusted access enabled for CloudFormation StackSets:
-   ```bash
-   aws organizations enable-aws-service-access --service-principal stacksets.cloudformation.amazonaws.com
-   ```
+```bash
+# Deploy StackSet to all organization accounts
+make deploy-stackset
 
-2. **StackSets Service Role** (if using service-managed permissions):
-   ```bash
-   aws iam create-service-linked-role --aws-service-name stacksets.cloudformation.amazonaws.com
-   ```
+# Check deployment status
+make status-stackset
 
-3. **Master Account Permissions**: See the updated IAM permissions section above
+# Get detailed status information
+make cli-status
 
-### Benefits
+# Delete StackSet and all instances
+make delete-stackset
+```
 
-- **One-Click Deployment**: No manual role creation needed
-- **Organization-Wide**: Automatically deploys to all active accounts
-- **Consistent Configuration**: Ensures identical role setup across accounts
-- **Real-Time Monitoring**: Track deployment progress and status
-- **Error Handling**: Clear feedback on failed deployments
-- **Security**: Built-in external ID protection and least privilege permissions
-
-### Alternative: Manual Setup
-
-If you prefer not to use the StackSet feature, you can still manually create the `OrganizationAccountAccessRole` in each account using the policies shown in the Target Account Roles section above.
-
-## API Endpoints
+## 🌐 API Endpoints
 
 ### IAM Management
 - `GET /api/accounts` - List organization accounts
@@ -275,36 +240,122 @@ If you prefer not to use the StackSet feature, you can still manually create the
 - `DELETE /api/accounts/:accountId/users/:username/keys/:keyId` - Delete access key
 - `PUT /api/accounts/:accountId/users/:username/keys/:keyId/rotate` - Rotate access key
 
-### 🆕 StackSet Management
+### StackSet Management
 - `GET /api/stackset/status` - Get StackSet deployment status
 - `POST /api/stackset/deploy` - Deploy/update StackSet to all accounts
 - `GET /api/stackset/deployment/:operationId` - Get deployment operation status
 - `DELETE /api/stackset/` - Delete StackSet and all instances
 - `GET /api/stackset/validate` - Validate StackSet deployment permissions
 
-## Security Considerations
+## 🏗️ Development
 
-- Access keys are only displayed once when created/rotated
-- All operations require proper IAM permissions
-- Uses temporary credentials when assuming roles
-- Frontend served by Go eliminates Node.js attack surface
+### Prerequisites
+- Go 1.21+
+- Node.js 18+ (for frontend development)
+- AWS CLI configured
+- Docker & Docker Compose
 
-## Development
+### Backend Development
+```bash
+make build-backend
+cd backend && go run ./cmd/server
+```
 
-To run in development mode:
+### Frontend Development
+```bash
+make dev-frontend
+# Runs on http://localhost:5173 with API proxy to :8080
+```
 
-1. Backend:
-   ```bash
-   cd backend
-   go mod tidy
-   go run .
-   ```
+### Full Development Environment
+```bash
+make dev
+# Builds everything and runs with Docker Compose
+```
 
-2. Frontend (in separate terminal):
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
+### Testing
+```bash
+# Run all tests
+make test
 
-The frontend will proxy API calls to the backend running on port 8080.
+# Run with coverage
+make test-coverage
+
+# Lint code
+make lint
+
+# Run all checks
+make check
+```
+
+## 🔒 Security Considerations
+
+- **Access Keys**: Only displayed once when created/rotated
+- **IAM Permissions**: All operations require proper AWS permissions
+- **Temporary Credentials**: Uses temporary credentials when assuming roles
+- **External ID**: Prevents confused deputy attacks
+- **Audit Trail**: All operations logged in CloudTrail
+- **Frontend Security**: Served by Go eliminates Node.js attack surface
+- **HTTPS Ready**: Built-in support for TLS termination
+
+## 🛠️ Troubleshooting
+
+### Common Issues
+
+**AWS Credentials Not Configured**
+```bash
+make check-aws-config
+```
+
+**Permission Denied**
+```bash
+# Check if your user has required permissions
+aws sts get-caller-identity
+aws organizations list-accounts
+```
+
+**StackSet Deployment Fails**
+```bash
+# Check StackSet status
+make status-stackset
+
+# View detailed logs
+make logs
+```
+
+**Container Won't Start**
+```bash
+# Check container logs
+docker-compose logs aws-iam-manager
+
+# Rebuild containers
+make clean
+make rebuild
+```
+
+## 📚 Additional Documentation
+
+- [CloudFormation Template](cloudformation/iam-manager-role.yaml) - StackSet deployment template
+- [Contributing Guidelines](CONTRIBUTING.md) - Development and contribution guide
+- [Environment Variables](.env.example) - Configuration options
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Run tests: `make check`
+4. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🆘 Support
+
+- **Issues**: [GitHub Issues](https://github.com/rusik69/aws-iam-manager/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/rusik69/aws-iam-manager/discussions)
+- **Documentation**: This README and inline code documentation
+
+---
+
+**Made with ❤️ for AWS Organizations** - Simplifying cross-account IAM management
