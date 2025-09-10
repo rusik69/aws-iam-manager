@@ -1,16 +1,17 @@
-package main
+package services
 
 import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/rusik69/aws-iam-manager/internal/models"
 
+	"github.com/stretchr/testify/assert"
 )
 
 func TestModelsCreation(t *testing.T) {
 	// Test Account struct
-	account := Account{
+	account := models.Account{
 		ID:   "123456789012",
 		Name: "Test Account",
 	}
@@ -19,7 +20,7 @@ func TestModelsCreation(t *testing.T) {
 
 	// Test User struct
 	createDate := time.Now()
-	user := User{
+	user := models.User{
 		Username:    "testuser",
 		UserID:      "AIDACKCEVSQ6C2EXAMPLE",
 		Arn:         "arn:aws:iam::123456789012:user/testuser",
@@ -42,7 +43,7 @@ func TestModelsCreation(t *testing.T) {
 	assert.Len(t, user.AccessKeys, 1)
 
 	// Test AccessKey struct
-	accessKey := AccessKey{
+	accessKey := models.AccessKey{
 		AccessKeyID: "AKIAIOSFODNN7EXAMPLE",
 		Status:      "Active",
 		CreateDate:  createDate,

@@ -432,14 +432,12 @@ clean:
 	rm -rf bin/
 	rm -rf frontend/dist/
 	rm -rf frontend/node_modules/
-	cd backend && rm -rf bin/
 
 # Clean only build artifacts
 clean-build:
 	@echo "🧹 Cleaning build artifacts..."
 	rm -rf bin/
 	rm -rf frontend/dist/
-	cd backend && rm -rf bin/
 
 # ============================================================================
 # INSTALLATION TARGETS

@@ -1,26 +1,29 @@
-package main
+package server
 
 import (
 	"fmt"
 	"log"
 	"net/http"
 
+	"github.com/rusik69/aws-iam-manager/internal/config"
+	"github.com/rusik69/aws-iam-manager/internal/handlers"
+	"github.com/rusik69/aws-iam-manager/internal/services"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-
 )
 
 // Frontend files are served from filesystem
 // TODO: Add embed support for production builds
 
 type Server struct {
-	config  Config
-	handler *Handler
+	config  config.Config
+	handler *handlers.Handler
 }
 
-func NewServer(cfg Config) *Server {
-	awsService := NewAWSService(cfg)
-	handler := NewHandler(awsService)
+func NewServer(cfg config.Config) *Server {
+	awsService := services.NewAWSService(cfg)
+	handler := handlers.NewHandler(awsService)
 
 	return &Server{
 		config:  cfg,

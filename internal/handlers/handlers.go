@@ -1,19 +1,21 @@
 // Package handlers provides HTTP request handlers for the AWS IAM manager
-package main
+package handlers
 
 import (
 	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/rusik69/aws-iam-manager/internal/services"
+
 	"github.com/gin-gonic/gin"
 )
 
 type Handler struct {
-	awsService AWSServiceInterface
+	awsService services.AWSServiceInterface
 }
 
-func NewHandler(awsService AWSServiceInterface) *Handler {
+func NewHandler(awsService services.AWSServiceInterface) *Handler {
 	return &Handler{
 		awsService: awsService,
 	}

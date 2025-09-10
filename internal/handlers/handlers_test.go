@@ -1,4 +1,4 @@
-package main
+package handlers
 
 import (
 	"encoding/json"
@@ -7,30 +7,31 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rusik69/aws-iam-manager/internal/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
-
 )
 
 // Mock AWS service for testing
 type MockAWSService struct{}
 
-func (m *MockAWSService) ListAccounts() ([]Account, error) {
-	return []Account{
+func (m *MockAWSService) ListAccounts() ([]models.Account, error) {
+	return []models.Account{
 		{ID: "123456789012", Name: "Test Account 1"},
 		{ID: "123456789013", Name: "Test Account 2"},
 	}, nil
 }
 
-func (m *MockAWSService) ListUsers(accountID string) ([]User, error) {
-	return []User{
+func (m *MockAWSService) ListUsers(accountID string) ([]models.User, error) {
+	return []models.User{
 		{
 			Username:    "testuser1",
 			UserID:      "AIDACKCEVSQ6C2EXAMPLE",
 			Arn:         "arn:aws:iam::123456789012:user/testuser1",
 			CreateDate:  time.Now(),
 			PasswordSet: true,
-			AccessKeys: []AccessKey{
+			AccessKeys: []models.AccessKey{
 				{
 					AccessKeyID: "AKIAIOSFODNN7EXAMPLE",
 					Status:      "Active",
@@ -41,14 +42,14 @@ func (m *MockAWSService) ListUsers(accountID string) ([]User, error) {
 	}, nil
 }
 
-func (m *MockAWSService) GetUser(accountID, username string) (*User, error) {
-	user := &User{
+func (m *MockAWSService) GetUser(accountID, username string) (*models.User, error) {
+	user := &models.User{
 		Username:    "testuser1",
 		UserID:      "AIDACKCEVSQ6C2EXAMPLE",
 		Arn:         "arn:aws:iam::123456789012:user/testuser1",
 		CreateDate:  time.Now(),
 		PasswordSet: true,
-		AccessKeys: []AccessKey{
+		AccessKeys: []models.AccessKey{
 			{
 				AccessKeyID: "AKIAIOSFODNN7EXAMPLE",
 				Status:      "Active",

@@ -1,4 +1,4 @@
-module aws-iam-manager
+module github.com/rusik69/aws-iam-manager
 
 go 1.22
 

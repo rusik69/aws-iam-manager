@@ -1,9 +1,12 @@
 // Package services provides business logic and external service integrations
-package main
+package services
 
 import (
 	"fmt"
 	"os"
+
+	"github.com/rusik69/aws-iam-manager/internal/config"
+	"github.com/rusik69/aws-iam-manager/internal/models"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -11,15 +14,14 @@ import (
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/sts"
-
 )
 
 type AWSService struct {
 	masterSession *session.Session
-	config        Config
+	config        config.Config
 }
 
-func NewAWSService(cfg Config) *AWSService {
+func NewAWSService(cfg config.Config) *AWSService {
 	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	region := os.Getenv("AWS_REGION")
@@ -79,19 +81,19 @@ func (s *AWSService) getSessionForAccount(accountID string) (*session.Session, e
 	return sess, nil
 }
 
-func (s *AWSService) ListAccounts() ([]Account, error) {
+func (s *AWSService) ListAccounts() ([]models.Account, error) {
 	orgClient := organizations.New(s.masterSession)
 	result, err := orgClient.ListAccounts(&organizations.ListAccountsInput{})
 	if err != nil {
 		return nil, err
 	}
 
-	var accounts []Account
+	var accounts []models.Account
 	for _, account := range result.Accounts {
 		// Test if we can access this account
 		accessible := s.testAccountAccess(*account.Id)
 		
-		accounts = append(accounts, Account{
+		accounts = append(accounts, models.Account{
 			ID:         *account.Id,
 			Name:       *account.Name,
 			Accessible: accessible,
@@ -111,12 +113,12 @@ func (s *AWSService) testAccountAccess(accountID string) bool {
 	return true
 }
 
-func (s *AWSService) ListUsers(accountID string) ([]User, error) {
+func (s *AWSService) ListUsers(accountID string) ([]models.User, error) {
 	sess, err := s.getSessionForAccount(accountID)
 	if err != nil {
 		fmt.Printf("[WARNING] Cannot access account %s, skipping user listing: %v\n", accountID, err)
 		// Return empty list instead of error for inaccessible accounts
-		return []User{}, nil
+		return []models.User{}, nil
 	}
 
 	iamClient := iam.New(sess)
@@ -125,7 +127,7 @@ func (s *AWSService) ListUsers(accountID string) ([]User, error) {
 		return nil, err
 	}
 
-	var users []User
+	var users []models.User
 	for _, user := range result.Users {
 		// Check if user has password
 		passwordSet := false
@@ -140,10 +142,10 @@ func (s *AWSService) ListUsers(accountID string) ([]User, error) {
 		keysResult, err := iamClient.ListAccessKeys(&iam.ListAccessKeysInput{
 			UserName: user.UserName,
 		})
-		var accessKeys []AccessKey
+		var accessKeys []models.AccessKey
 		if err == nil {
 			for _, key := range keysResult.AccessKeyMetadata {
-				accessKeys = append(accessKeys, AccessKey{
+				accessKeys = append(accessKeys, models.AccessKey{
 					AccessKeyID: *key.AccessKeyId,
 					Status:      *key.Status,
 					CreateDate:  *key.CreateDate,
@@ -151,7 +153,7 @@ func (s *AWSService) ListUsers(accountID string) ([]User, error) {
 			}
 		}
 
-		users = append(users, User{
+		users = append(users, models.User{
 			Username:    *user.UserName,
 			UserID:      *user.UserId,
 			Arn:         *user.Arn,
@@ -164,7 +166,7 @@ func (s *AWSService) ListUsers(accountID string) ([]User, error) {
 	return users, nil
 }
 
-func (s *AWSService) GetUser(accountID, username string) (*User, error) {
+func (s *AWSService) GetUser(accountID, username string) (*models.User, error) {
 	sess, err := s.getSessionForAccount(accountID)
 	if err != nil {
 		return nil, fmt.Errorf("cannot access account %s: %w", accountID, err)
@@ -193,10 +195,10 @@ func (s *AWSService) GetUser(accountID, username string) (*User, error) {
 	keysResult, err := iamClient.ListAccessKeys(&iam.ListAccessKeysInput{
 		UserName: user.UserName,
 	})
-	var accessKeys []AccessKey
+	var accessKeys []models.AccessKey
 	if err == nil {
 		for _, key := range keysResult.AccessKeyMetadata {
-			accessKeys = append(accessKeys, AccessKey{
+			accessKeys = append(accessKeys, models.AccessKey{
 				AccessKeyID: *key.AccessKeyId,
 				Status:      *key.Status,
 				CreateDate:  *key.CreateDate,
@@ -204,7 +206,7 @@ func (s *AWSService) GetUser(accountID, username string) (*User, error) {
 		}
 	}
 
-	userResponse := &User{
+	userResponse := &models.User{
 		Username:    *user.UserName,
 		UserID:      *user.UserId,
 		Arn:         *user.Arn,
@@ -320,6 +322,24 @@ func (s *AWSService) DeleteUser(accountID, username string) error {
 		})
 		if err != nil {
 			return fmt.Errorf("failed to delete access key %s: %v", *key.AccessKeyId, err)
+		}
+	}
+
+	// Remove user from all groups
+	groupsResult, err := iamClient.ListGroupsForUser(&iam.ListGroupsForUserInput{
+		UserName: aws.String(username),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list groups for user: %v", err)
+	}
+
+	for _, group := range groupsResult.Groups {
+		_, err = iamClient.RemoveUserFromGroup(&iam.RemoveUserFromGroupInput{
+			UserName:  aws.String(username),
+			GroupName: group.GroupName,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to remove user from group %s: %v", *group.GroupName, err)
 		}
 	}
 

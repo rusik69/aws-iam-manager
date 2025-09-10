@@ -12,9 +12,10 @@ WORKDIR /app
 RUN apk add --no-cache git
 COPY go.mod go.sum ./
 RUN go mod download
-COPY *.go ./
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o server .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o server ./cmd/server
 
 # Final stage
 FROM alpine:latest

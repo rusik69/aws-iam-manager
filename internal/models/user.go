@@ -1,5 +1,5 @@
 // Package models contains data structures for AWS IAM entities
-package main
+package models
 
 import "time"
 

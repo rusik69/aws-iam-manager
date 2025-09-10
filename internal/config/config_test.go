@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -7,24 +7,29 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLoad(t *testing.T) {
+func TestLoadConfig(t *testing.T) {
 	// Test default values
 	os.Unsetenv("PORT")
 	os.Unsetenv("AWS_REGION")
+	os.Unsetenv("IAM_ROLE_NAME")
 
-	cfg := Load()
+	cfg := LoadConfig()
 	assert.Equal(t, "8080", cfg.Port)
 	assert.Equal(t, "us-east-1", cfg.AWSRegion)
+	assert.Equal(t, "OrganizationAccountAccessRole", cfg.RoleName)
 
 	// Test custom values
 	os.Setenv("PORT", "9000")
 	os.Setenv("AWS_REGION", "us-west-2")
+	os.Setenv("IAM_ROLE_NAME", "CustomRole")
 
-	cfg = Load()
+	cfg = LoadConfig()
 	assert.Equal(t, "9000", cfg.Port)
 	assert.Equal(t, "us-west-2", cfg.AWSRegion)
+	assert.Equal(t, "CustomRole", cfg.RoleName)
 
 	// Clean up
 	os.Unsetenv("PORT")
 	os.Unsetenv("AWS_REGION")
+	os.Unsetenv("IAM_ROLE_NAME")
 }
