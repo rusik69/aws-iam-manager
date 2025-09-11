@@ -8,6 +8,8 @@
           </router-link>
         </div>
         <nav>
+          <router-link to="/" class="nav-link">Users</router-link>
+          <router-link to="/public-ips" class="nav-link">Public IPs</router-link>
           <button @click="toggleTheme" class="theme-btn">
             {{ isDarkTheme ? '☀️' : '🌙' }}
           </button>
@@ -180,16 +182,24 @@ nav {
   gap: 1rem;
 }
 
-nav a {
-  color: white;
+.nav-link {
+  color: var(--color-text-primary);
   text-decoration: none;
-  padding: 0.5rem 1rem;
-  border-radius: 0.5rem;
-  transition: background 0.2s;
+  padding: var(--spacing-sm) var(--spacing);
+  border-radius: var(--radius);
+  transition: all var(--transition-fast);
+  font-weight: 500;
+  position: relative;
 }
 
-nav a:hover {
-  background: rgba(255,255,255,0.1);
+.nav-link:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-btn-primary);
+}
+
+.nav-link.router-link-active {
+  background: var(--color-btn-primary);
+  color: white;
 }
 
 .theme-btn {

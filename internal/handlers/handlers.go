@@ -146,3 +146,16 @@ func (h *Handler) DeleteUser(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
 }
+
+func (h *Handler) ListPublicIPs(c *gin.Context) {
+	ips, err := h.awsService.ListPublicIPs()
+	if err != nil {
+		fmt.Printf("[ERROR] ListPublicIPs failed: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": "Failed to list public IP addresses. Check AWS credentials and permissions.",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, ips)
+}

@@ -10,4 +10,5 @@ type AWSServiceInterface interface {
 	DeleteAccessKey(accountID, username, keyID string) error
 	RotateAccessKey(accountID, username, keyID string) (map[string]any, error)
 	DeleteUser(accountID, username string) error
+	ListPublicIPs() ([]models.PublicIP, error)
 }

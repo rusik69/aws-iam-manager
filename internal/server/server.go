@@ -46,6 +46,9 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.POST("/accounts/:accountId/users/:username/keys", s.handler.CreateAccessKey)
 		api.DELETE("/accounts/:accountId/users/:username/keys/:keyId", s.handler.DeleteAccessKey)
 		api.PUT("/accounts/:accountId/users/:username/keys/:keyId/rotate", s.handler.RotateAccessKey)
+		
+		// Public IP management routes
+		api.GET("/public-ips", s.handler.ListPublicIPs)
 	}
 
 	// Serve frontend

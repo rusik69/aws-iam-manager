@@ -87,6 +87,31 @@ func (m *MockAWSService) DeleteUser(accountID, username string) error {
 	return nil
 }
 
+func (m *MockAWSService) ListPublicIPs() ([]models.PublicIP, error) {
+	return []models.PublicIP{
+		{
+			IPAddress:    "54.123.45.67",
+			AccountID:    "123456789012",
+			AccountName:  "Test Account 1",
+			Region:       "us-east-1",
+			ResourceType: "EC2",
+			ResourceID:   "i-1234567890abcdef0",
+			ResourceName: "test-instance",
+			State:        "running",
+		},
+		{
+			IPAddress:    "52.98.76.54",
+			AccountID:    "123456789013",
+			AccountName:  "Test Account 2",
+			Region:       "us-west-2",
+			ResourceType: "application",
+			ResourceID:   "arn:aws:elasticloadbalancing:us-west-2:123456789013:loadbalancer/app/test-alb/50dc6c495c0c9188",
+			ResourceName: "test-alb",
+			State:        "active",
+		},
+	}, nil
+}
+
 func setupRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -103,6 +128,7 @@ func setupRouter() *gin.Engine {
 		api.POST("/accounts/:accountId/users/:username/keys", handler.CreateAccessKey)
 		api.DELETE("/accounts/:accountId/users/:username/keys/:keyId", handler.DeleteAccessKey)
 		api.PUT("/accounts/:accountId/users/:username/keys/:keyId/rotate", handler.RotateAccessKey)
+		api.GET("/public-ips", handler.ListPublicIPs)
 	}
 
 	return r
@@ -117,7 +143,7 @@ func TestListAccounts(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var accounts []Account
+	var accounts []models.Account
 	err := json.Unmarshal(w.Body.Bytes(), &accounts)
 	assert.NoError(t, err)
 	assert.Len(t, accounts, 2)
@@ -133,7 +159,7 @@ func TestListUsers(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var users []User
+	var users []models.User
 	err := json.Unmarshal(w.Body.Bytes(), &users)
 	assert.NoError(t, err)
 	assert.Len(t, users, 1)
@@ -151,7 +177,7 @@ func TestGetUser(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var user User
+	var user models.User
 	err := json.Unmarshal(w.Body.Bytes(), &user)
 	assert.NoError(t, err)
 	assert.Equal(t, "testuser1", user.Username)
@@ -220,4 +246,25 @@ func TestDeleteUser(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Equal(t, "User deleted successfully", response["message"])
+}
+
+func TestListPublicIPs(t *testing.T) {
+	router := setupRouter()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/public-ips", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var ips []models.PublicIP
+	err := json.Unmarshal(w.Body.Bytes(), &ips)
+	assert.NoError(t, err)
+	assert.Len(t, ips, 2)
+	assert.Equal(t, "54.123.45.67", ips[0].IPAddress)
+	assert.Equal(t, "EC2", ips[0].ResourceType)
+	assert.Equal(t, "us-east-1", ips[0].Region)
+	assert.Equal(t, "52.98.76.54", ips[1].IPAddress)
+	assert.Equal(t, "application", ips[1].ResourceType)
+	assert.Equal(t, "us-west-2", ips[1].Region)
 }

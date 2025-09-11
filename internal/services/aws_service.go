@@ -4,6 +4,7 @@ package services
 import (
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/rusik69/aws-iam-manager/internal/config"
 	"github.com/rusik69/aws-iam-manager/internal/models"
@@ -11,6 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/elbv2"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/sts"
@@ -358,4 +361,263 @@ func (s *AWSService) DeleteUser(accountID, username string) error {
 	}
 
 	return nil
+}
+
+func (s *AWSService) ListPublicIPs() ([]models.PublicIP, error) {
+	accounts, err := s.ListAccounts()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list accounts: %v", err)
+	}
+
+	// Filter accessible accounts
+	var accessibleAccounts []models.Account
+	for _, account := range accounts {
+		if !account.Accessible {
+			fmt.Printf("[WARNING] Skipping inaccessible account %s\n", account.ID)
+			continue
+		}
+		accessibleAccounts = append(accessibleAccounts, account)
+	}
+
+	if len(accessibleAccounts) == 0 {
+		return []models.PublicIP{}, nil
+	}
+
+	// Channel to collect results from goroutines
+	type accountResult struct {
+		ips []models.PublicIP
+		err error
+		accountID string
+	}
+
+	resultChan := make(chan accountResult, len(accessibleAccounts))
+	var wg sync.WaitGroup
+
+	// Process each account in parallel
+	for _, account := range accessibleAccounts {
+		wg.Add(1)
+		go func(acc models.Account) {
+			defer wg.Done()
+			
+			ips, err := s.getPublicIPsForAccount(acc)
+			resultChan <- accountResult{
+				ips: ips,
+				err: err,
+				accountID: acc.ID,
+			}
+		}(account)
+	}
+
+	// Wait for all goroutines to complete and close channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var allIPs []models.PublicIP
+	for result := range resultChan {
+		if result.err != nil {
+			fmt.Printf("[WARNING] Failed to get IPs for account %s: %v\n", result.accountID, result.err)
+			continue
+		}
+		allIPs = append(allIPs, result.ips...)
+	}
+
+	return allIPs, nil
+}
+
+func (s *AWSService) getPublicIPsForAccount(account models.Account) ([]models.PublicIP, error) {
+	sess, err := s.getSessionForAccount(account.ID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot access account %s: %w", account.ID, err)
+	}
+
+	// Get all regions
+	ec2Client := ec2.New(sess)
+	regionsResult, err := ec2Client.DescribeRegions(&ec2.DescribeRegionsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe regions: %v", err)
+	}
+
+	if len(regionsResult.Regions) == 0 {
+		return []models.PublicIP{}, nil
+	}
+
+	// Channel to collect results from region goroutines
+	type regionResult struct {
+		ips []models.PublicIP
+		regionName string
+	}
+
+	resultChan := make(chan regionResult, len(regionsResult.Regions))
+	var wg sync.WaitGroup
+
+	// Process each region in parallel
+	for _, region := range regionsResult.Regions {
+		wg.Add(1)
+		go func(regionName string) {
+			defer wg.Done()
+			
+			// Create session for this region
+			regionSess := sess.Copy(&aws.Config{Region: aws.String(regionName)})
+			var regionIPs []models.PublicIP
+			
+			// Get EC2 instances
+			ec2IPs, err := s.getEC2PublicIPs(regionSess, account, regionName)
+			if err != nil {
+				fmt.Printf("[WARNING] Failed to get EC2 IPs in region %s for account %s: %v\n", regionName, account.ID, err)
+			} else {
+				regionIPs = append(regionIPs, ec2IPs...)
+			}
+
+			// Get Load Balancers
+			elbIPs, err := s.getELBPublicIPs(regionSess, account, regionName)
+			if err != nil {
+				fmt.Printf("[WARNING] Failed to get ELB IPs in region %s for account %s: %v\n", regionName, account.ID, err)
+			} else {
+				regionIPs = append(regionIPs, elbIPs...)
+			}
+
+			// Get NAT Gateways
+			natIPs, err := s.getNATPublicIPs(regionSess, account, regionName)
+			if err != nil {
+				fmt.Printf("[WARNING] Failed to get NAT IPs in region %s for account %s: %v\n", regionName, account.ID, err)
+			} else {
+				regionIPs = append(regionIPs, natIPs...)
+			}
+			
+			resultChan <- regionResult{
+				ips: regionIPs,
+				regionName: regionName,
+			}
+		}(*region.RegionName)
+	}
+
+	// Wait for all goroutines to complete and close channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var allIPs []models.PublicIP
+	for result := range resultChan {
+		allIPs = append(allIPs, result.ips...)
+	}
+
+	return allIPs, nil
+}
+
+func (s *AWSService) getEC2PublicIPs(sess *session.Session, account models.Account, region string) ([]models.PublicIP, error) {
+	ec2Client := ec2.New(sess)
+	var ips []models.PublicIP
+
+	result, err := ec2Client.DescribeInstances(&ec2.DescribeInstancesInput{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, reservation := range result.Reservations {
+		for _, instance := range reservation.Instances {
+			if instance.PublicIpAddress != nil && *instance.PublicIpAddress != "" {
+				instanceName := ""
+				for _, tag := range instance.Tags {
+					if *tag.Key == "Name" {
+						instanceName = *tag.Value
+						break
+					}
+				}
+
+				ips = append(ips, models.PublicIP{
+					IPAddress:    *instance.PublicIpAddress,
+					AccountID:    account.ID,
+					AccountName:  account.Name,
+					Region:       region,
+					ResourceType: "EC2",
+					ResourceID:   *instance.InstanceId,
+					ResourceName: instanceName,
+					State:        *instance.State.Name,
+				})
+			}
+		}
+	}
+
+	return ips, nil
+}
+
+func (s *AWSService) getELBPublicIPs(sess *session.Session, account models.Account, region string) ([]models.PublicIP, error) {
+	elbClient := elbv2.New(sess)
+	var ips []models.PublicIP
+
+	result, err := elbClient.DescribeLoadBalancers(&elbv2.DescribeLoadBalancersInput{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, lb := range result.LoadBalancers {
+		if lb.Scheme != nil && *lb.Scheme == "internet-facing" {
+			// Get load balancer IPs by resolving DNS name
+			// For ALB/NLB, we can get the IP addresses from network interfaces
+			if lb.IpAddressType != nil {
+				for _, az := range lb.AvailabilityZones {
+					if az.LoadBalancerAddresses != nil {
+						for _, addr := range az.LoadBalancerAddresses {
+							if addr.IpAddress != nil && *addr.IpAddress != "" {
+								ips = append(ips, models.PublicIP{
+									IPAddress:    *addr.IpAddress,
+									AccountID:    account.ID,
+									AccountName:  account.Name,
+									Region:       region,
+									ResourceType: string(*lb.Type),
+									ResourceID:   *lb.LoadBalancerArn,
+									ResourceName: *lb.LoadBalancerName,
+									State:        string(*lb.State.Code),
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return ips, nil
+}
+
+func (s *AWSService) getNATPublicIPs(sess *session.Session, account models.Account, region string) ([]models.PublicIP, error) {
+	ec2Client := ec2.New(sess)
+	var ips []models.PublicIP
+
+	result, err := ec2Client.DescribeNatGateways(&ec2.DescribeNatGatewaysInput{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, nat := range result.NatGateways {
+		for _, addr := range nat.NatGatewayAddresses {
+			if addr.PublicIp != nil && *addr.PublicIp != "" {
+				natName := ""
+				for _, tag := range nat.Tags {
+					if *tag.Key == "Name" {
+						natName = *tag.Value
+						break
+					}
+				}
+
+				ips = append(ips, models.PublicIP{
+					IPAddress:    *addr.PublicIp,
+					AccountID:    account.ID,
+					AccountName:  account.Name,
+					Region:       region,
+					ResourceType: "NAT",
+					ResourceID:   *nat.NatGatewayId,
+					ResourceName: natName,
+					State:        string(*nat.State),
+				})
+			}
+		}
+	}
+
+	return ips, nil
 }

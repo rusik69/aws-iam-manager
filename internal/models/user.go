@@ -26,3 +26,15 @@ type AccessKey struct {
 	Status      string    `json:"status"`
 	CreateDate  time.Time `json:"create_date"`
 }
+
+// PublicIP represents a public IP address used by AWS resources
+type PublicIP struct {
+	IPAddress    string `json:"ip_address"`
+	AccountID    string `json:"account_id"`
+	AccountName  string `json:"account_name"`
+	Region       string `json:"region"`
+	ResourceType string `json:"resource_type"` // "EC2", "ELB", "ALB", "NLB", "NAT"
+	ResourceID   string `json:"resource_id"`
+	ResourceName string `json:"resource_name,omitempty"`
+	State        string `json:"state,omitempty"` // running, stopped, etc.
+}

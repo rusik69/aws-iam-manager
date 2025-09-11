@@ -106,6 +106,25 @@ Resources:
               - 'iam:GetAccountSummary'
               - 'iam:GetAccountPasswordPolicy'
             Resource: '*'
+          - Sid: 'AllowEC2PublicIPListing'
+            Effect: Allow
+            Action:
+              - 'ec2:DescribeInstances'
+              - 'ec2:DescribeRegions'
+              - 'ec2:DescribeNetworkInterfaces'
+              - 'ec2:DescribeAddresses'
+              - 'ec2:DescribeNatGateways'
+            Resource: '*'
+          - Sid: 'AllowELBPublicIPListing'
+            Effect: Allow
+            Action:
+              - 'elasticloadbalancing:DescribeLoadBalancers'
+              - 'elasticloadbalancing:DescribeTargetGroups'
+              - 'elasticloadbalancing:DescribeListeners'
+              - 'elbv2:DescribeLoadBalancers'
+              - 'elbv2:DescribeTargetGroups'
+              - 'elbv2:DescribeListeners'
+            Resource: '*'
       Roles:
         - !Ref IAMManagerRole
 
