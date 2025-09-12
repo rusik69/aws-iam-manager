@@ -21,9 +21,9 @@ func LoadConfig() Config {
 		region = "us-east-1"
 	}
 
-	roleName := os.Getenv("IAM_ROLE_NAME")
+	roleName := os.Getenv("IAM_ORG_ROLE_NAME")
 	if roleName == "" {
-		roleName = "OrganizationAccountAccessRole"
+		roleName = "IAMManagerCrossAccountRole"
 	}
 
 	return Config{

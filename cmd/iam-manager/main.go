@@ -22,7 +22,7 @@ const (
 	defaultRoleName     = "IAMManagerRole"
 	defaultStackSetName = "IAMManagerRoleStackSet"
 	defaultRegions      = "us-east-1"
-	defaultOrgRoleName  = "OrganizationAccountAccessRole"
+	defaultOrgRoleName  = "IAMManagerCrossAccountRole"
 
 	// Colors for output
 	colorReset  = "\033[0m"
@@ -98,7 +98,7 @@ func newIAMManager(ctx context.Context) (*IAMManager, error) {
 		roleName:     getEnvOrDefault("IAM_ROLE_NAME", defaultRoleName),
 		stackSetName: getEnvOrDefault("STACK_SET_NAME", defaultStackSetName),
 		regions:      getEnvOrDefault("REGIONS", defaultRegions),
-		orgRoleName:  getEnvOrDefault("IAM_ROLE_NAME", defaultOrgRoleName),
+		orgRoleName:  getEnvOrDefault("IAM_ORG_ROLE_NAME", defaultOrgRoleName),
 	}, nil
 }
 

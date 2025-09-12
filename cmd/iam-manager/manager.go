@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
 	cfntypes "github.com/aws/aws-sdk-go-v2/service/cloudformation/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/aws/aws-sdk-go-v2/service/organizations"
 	orgtypes "github.com/aws/aws-sdk-go-v2/service/organizations/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 // Deploy user functionality
@@ -233,8 +235,8 @@ AWS_SECRET_ACCESS_KEY=%s
 AWS_REGION=us-east-1
 PORT=8080
 
-# Optional: Set this if you want to use a specific role name
-# IAM_ROLE_NAME=OrganizationAccountAccessRole
+# Optional: Set this if you want to use a specific cross-account role name
+# IAM_ORG_ROLE_NAME=IAMManagerCrossAccountRole
 `, time.Now().Format("2006-01-02 15:04:05"), *accessKey.AccessKeyId, *accessKey.SecretAccessKey)
 
 	envFile := "/tmp/iam-manager.env"
@@ -606,7 +608,7 @@ func (m *IAMManager) printRemovalSummary() {
 func (m *IAMManager) createRole(ctx context.Context) error {
 	printHeader("AWS IAM Manager - Create Role")
 
-	logInfo("This will create an alternative IAM role for cross-account access:")
+	logInfo("This will create an IAM Manager role for cross-account access:")
 	fmt.Printf("  - Role Name: %s\n", m.roleName)
 	fmt.Printf("  - Account: %s\n", m.accountID)
 	fmt.Println("  - Full IAM permissions for user management")
@@ -850,7 +852,7 @@ func (m *IAMManager) deployStackSet(ctx context.Context) error {
 	fmt.Printf("  Template: cloudformation/iam-manager-role.yaml\n")
 	fmt.Printf("  Master Account: %s\n", m.accountID)
 	fmt.Printf("  Master User: %s\n", m.userName)
-	fmt.Printf("  Role Name: %s\n", m.orgRoleName)
+	fmt.Printf("  Cross-Account Role Name: %s\n", m.orgRoleName)
 	fmt.Printf("  Regions: %s\n", m.regions)
 	fmt.Println()
 
@@ -1261,7 +1263,12 @@ func (m *IAMManager) deleteStackSet(ctx context.Context) error {
 	fmt.Printf("  - StackSet: %s\n", m.stackSetName)
 	if len(instancesResult.Summaries) > 0 {
 		fmt.Printf("  - All %d stack instances across organization accounts\n", len(instancesResult.Summaries))
-		fmt.Println("  - All IAM roles created by these stacks")
+		fmt.Printf("  - IAM Manager role '%s' from ALL organization accounts\n", m.orgRoleName)
+		fmt.Println("  - All managed and inline policies attached to these roles")
+		fmt.Println("  - All CloudFormation stacks created by the StackSet")
+		fmt.Println()
+		fmt.Printf("%sIMPORTANT: This will remove cross-account access roles from ALL accounts%s\n", colorYellow, colorReset)
+		fmt.Printf("%sYou will lose the ability to manage IAM in those accounts until redeployed%s\n", colorYellow, colorReset)
 	}
 	fmt.Println()
 
@@ -1270,7 +1277,16 @@ func (m *IAMManager) deleteStackSet(ctx context.Context) error {
 		return nil
 	}
 
-	// Delete all stack instances first
+	// First, manually remove IAM roles from all accounts before deleting stack instances
+	if len(instancesResult.Summaries) > 0 {
+		logInfo("Removing IAM roles from all accounts...")
+		if err := m.removeIAMRolesFromAccounts(ctx, instancesResult.Summaries); err != nil {
+			logWarning(fmt.Sprintf("Failed to remove IAM roles from some accounts: %v", err))
+			logInfo("Continuing with StackSet deletion...")
+		}
+	}
+
+	// Delete all stack instances
 	if len(instancesResult.Summaries) > 0 {
 		logInfo("Deleting all stack instances...")
 		logInfo("Deletion Configuration:")
@@ -1382,6 +1398,167 @@ func (m *IAMManager) deleteStackSet(ctx context.Context) error {
 	return nil
 }
 
+func (m *IAMManager) removeIAMRolesFromAccounts(ctx context.Context, instances []cfntypes.StackInstanceSummary) error {
+	logInfo("Parallel IAM role removal across all accounts...")
+	
+	// Extract unique account IDs
+	accountSet := make(map[string]bool)
+	for _, instance := range instances {
+		accountSet[*instance.Account] = true
+	}
+	
+	// Convert to slice for parallel processing
+	var accountIDs []string
+	for accountID := range accountSet {
+		accountIDs = append(accountIDs, accountID)
+	}
+	
+	logInfo(fmt.Sprintf("Removing role '%s' from %d accounts", m.orgRoleName, len(accountIDs)))
+	
+	// Use channels to collect results from parallel operations
+	type accountResult struct {
+		accountID string
+		success   bool
+		error     error
+	}
+	
+	resultChan := make(chan accountResult, len(accountIDs))
+	
+	// Process each account in parallel
+	for _, accountID := range accountIDs {
+		go func(accID string) {
+			success := m.removeRoleFromAccount(ctx, accID)
+			resultChan <- accountResult{
+				accountID: accID,
+				success:   success,
+				error:     nil, // We're handling errors internally in removeRoleFromAccount
+			}
+		}(accountID)
+	}
+	
+	// Collect results
+	successCount := 0
+	failureCount := 0
+	
+	for i := 0; i < len(accountIDs); i++ {
+		result := <-resultChan
+		if result.success {
+			successCount++
+		} else {
+			failureCount++
+		}
+	}
+	
+	logInfo(fmt.Sprintf("Role removal completed: %d successful, %d failed", successCount, failureCount))
+	
+	if failureCount > 0 {
+		logWarning(fmt.Sprintf("%d accounts had failures during role removal", failureCount))
+		logInfo("This is expected for accounts where the role doesn't exist or access is denied")
+	}
+	
+	return nil
+}
+
+func (m *IAMManager) removeRoleFromAccount(ctx context.Context, accountID string) bool {
+	// Skip the master account (current account)
+	if accountID == m.accountID {
+		logInfo(fmt.Sprintf("Skipping master account %s", accountID))
+		return true
+	}
+	
+	// Create credentials for cross-account access
+	roleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s", accountID, m.orgRoleName)
+	externalID := fmt.Sprintf("%s-iam-manager", accountID)
+	
+	logInfo(fmt.Sprintf("Attempting to remove role from account %s...", accountID))
+	
+	// Assume role in the target account
+	result, err := m.stsClient.AssumeRole(ctx, &sts.AssumeRoleInput{
+		RoleArn:         aws.String(roleArn),
+		RoleSessionName: aws.String("iam-manager-cleanup"),
+		ExternalId:      aws.String(externalID),
+		DurationSeconds: aws.Int32(900), // 15 minutes
+	})
+	
+	if err != nil {
+		logWarning(fmt.Sprintf("Cannot assume role in account %s: %v", accountID, err))
+		logInfo(fmt.Sprintf("This is expected if the role doesn't exist in account %s", accountID))
+		return false
+	}
+	
+	// Create IAM client with assumed role credentials
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		logWarning(fmt.Sprintf("Failed to load config for account %s: %v", accountID, err))
+		return false
+	}
+	
+	// Create temporary credentials
+	creds := result.Credentials
+	cfg.Credentials = aws.NewCredentialsCache(aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+		return aws.Credentials{
+			AccessKeyID:     *creds.AccessKeyId,
+			SecretAccessKey: *creds.SecretAccessKey,
+			SessionToken:    *creds.SessionToken,
+		}, nil
+	}))
+	
+	targetIAMClient := iam.NewFromConfig(cfg)
+	
+	// List and detach managed policies from the role
+	listPoliciesResult, err := targetIAMClient.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{
+		RoleName: aws.String(m.orgRoleName),
+	})
+	
+	if err != nil {
+		logWarning(fmt.Sprintf("Failed to list policies for role in account %s: %v", accountID, err))
+	} else {
+		// Detach all managed policies
+		for _, policy := range listPoliciesResult.AttachedPolicies {
+			_, err := targetIAMClient.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{
+				RoleName:  aws.String(m.orgRoleName),
+				PolicyArn: policy.PolicyArn,
+			})
+			if err != nil {
+				logWarning(fmt.Sprintf("Failed to detach policy %s from role in account %s: %v", *policy.PolicyArn, accountID, err))
+			}
+		}
+	}
+	
+	// List and delete inline policies
+	listInlinePoliciesResult, err := targetIAMClient.ListRolePolicies(ctx, &iam.ListRolePoliciesInput{
+		RoleName: aws.String(m.orgRoleName),
+	})
+	
+	if err != nil {
+		logWarning(fmt.Sprintf("Failed to list inline policies for role in account %s: %v", accountID, err))
+	} else {
+		// Delete all inline policies
+		for _, policyName := range listInlinePoliciesResult.PolicyNames {
+			_, err := targetIAMClient.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{
+				RoleName:   aws.String(m.orgRoleName),
+				PolicyName: aws.String(policyName),
+			})
+			if err != nil {
+				logWarning(fmt.Sprintf("Failed to delete inline policy %s from role in account %s: %v", policyName, accountID, err))
+			}
+		}
+	}
+	
+	// Finally, delete the role itself
+	_, err = targetIAMClient.DeleteRole(ctx, &iam.DeleteRoleInput{
+		RoleName: aws.String(m.orgRoleName),
+	})
+	
+	if err != nil {
+		logWarning(fmt.Sprintf("Failed to delete role in account %s: %v", accountID, err))
+		return false
+	}
+	
+	logSuccess(fmt.Sprintf("Successfully removed role from account %s", accountID))
+	return true
+}
+
 func (m *IAMManager) printDeletionSummary() {
 	fmt.Println()
 	fmt.Println("=======================================================================")
@@ -1391,8 +1568,9 @@ func (m *IAMManager) printDeletionSummary() {
 	fmt.Printf("%sDeleted Resources:%s\n", colorBlue, colorReset)
 	fmt.Printf("  • StackSet: %s\n", m.stackSetName)
 	fmt.Println("  • All stack instances across organization accounts")
-	fmt.Printf("  • IAM roles: %s (in each target account)\n", m.orgRoleName)
-	fmt.Println("  • All associated IAM policies")
+	fmt.Printf("  • IAM Manager roles: %s (manually removed from each account)\n", m.orgRoleName)
+	fmt.Println("  • All associated IAM policies (managed and inline)")
+	fmt.Println("  • CloudFormation stacks created by the StackSet")
 	fmt.Println()
 	fmt.Printf("%sNote: Master account IAM user and policies were preserved%s\n", colorYellow, colorReset)
 	fmt.Println("=======================================================================")

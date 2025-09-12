@@ -10,7 +10,7 @@ Parameters:
   RoleName:
     Type: String
     Description: 'Name of the IAM role to create'
-    Default: 'OrganizationAccountAccessRole'
+    Default: 'IAMManagerCrossAccountRole'
     
   MasterUserName:
     Type: String
@@ -18,11 +18,11 @@ Parameters:
     Default: 'iam-manager'
 
 Resources:
-  IAMManagerRole:
+  IAMManagerCrossAccountRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Ref RoleName
-      Description: 'Role for AWS IAM Manager to perform user management operations'
+      Description: 'IAM Manager cross-account role for centralized user management operations v1.1'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -32,24 +32,23 @@ Resources:
                 - !Sub 'arn:aws:iam::${MasterAccountId}:user/${MasterUserName}'
                 - !Sub 'arn:aws:iam::${MasterAccountId}:root'
             Action: 'sts:AssumeRole'
-            Condition:
-              StringEquals:
-                'sts:ExternalId': !Sub '${AWS::AccountId}-iam-manager'
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/IAMFullAccess'
       Tags:
         - Key: 'Purpose'
-          Value: 'AWS IAM Manager Cross-Account Access'
+          Value: 'IAM Manager Cross-Account Access'
         - Key: 'CreatedBy'
-          Value: 'CloudFormation StackSet'
+          Value: 'IAM Manager StackSet'
         - Key: 'Environment'
           Value: 'Production'
+        - Key: 'Component'
+          Value: 'CrossAccountRole'
 
   # Custom policy for additional permissions if needed
-  IAMManagerCustomPolicy:
+  IAMManagerCrossAccountPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: 'IAMManagerCustomPermissions'
+      PolicyName: 'IAMManagerCrossAccountPermissions'
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -126,21 +125,21 @@ Resources:
               - 'elbv2:DescribeListeners'
             Resource: '*'
       Roles:
-        - !Ref IAMManagerRole
+        - !Ref IAMManagerCrossAccountRole
 
 Outputs:
   RoleArn:
-    Description: 'ARN of the created IAM role'
-    Value: !GetAtt IAMManagerRole.Arn
+    Description: 'ARN of the created IAM Manager cross-account role'
+    Value: !GetAtt IAMManagerCrossAccountRole.Arn
     Export:
       Name: !Sub '${AWS::StackName}-RoleArn'
       
   RoleName:
-    Description: 'Name of the created IAM role'
-    Value: !Ref IAMManagerRole
+    Description: 'Name of the created IAM Manager cross-account role'
+    Value: !Ref IAMManagerCrossAccountRole
     Export:
       Name: !Sub '${AWS::StackName}-RoleName'
       
   AssumeRoleCommand:
     Description: 'CLI command to assume this role'
-    Value: !Sub 'aws sts assume-role --role-arn ${IAMManagerRole.Arn} --role-session-name IAMManager --external-id ${AWS::AccountId}-iam-manager'
+    Value: !Sub 'aws sts assume-role --role-arn ${IAMManagerCrossAccountRole.Arn} --role-session-name IAMManager --external-id ${AWS::AccountId}-iam-manager'

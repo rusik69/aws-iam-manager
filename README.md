@@ -34,7 +34,7 @@ A comprehensive web application for managing IAM users across multiple AWS accou
    - Assume roles in target accounts (`sts:AssumeRole`)
    - CloudFormation StackSets operations (for automated role deployment)
    - Organizations service access
-3. **Target account roles** (`OrganizationAccountAccessRole`) **OR** use our automated StackSet deployment
+3. **Target account roles** (`IAMManagerCrossAccountRole`) **OR** use our automated StackSet deployment
 4. **Docker and Docker Compose** (for containerized deployment)
 5. **Go 1.21+** (for CLI and local development)
 
@@ -102,7 +102,7 @@ AWS_SECRET_ACCESS_KEY=your_secret_key_here
 AWS_REGION=us-east-1
 
 # Optional IAM configuration
-IAM_ROLE_NAME=OrganizationAccountAccessRole
+IAM_ORG_ROLE_NAME=IAMManagerCrossAccountRole
 IAM_USER_NAME=iam-manager
 IAM_POLICY_NAME=IAMManagerCustomPolicy
 STACK_SET_NAME=IAMManagerRoleStackSet
@@ -208,7 +208,7 @@ If you prefer minimal permissions, create a custom policy:
 
 The StackSet creates in each target account:
 
-- **IAM Role**: `OrganizationAccountAccessRole`
+- **IAM Role**: `IAMManagerCrossAccountRole`
 - **Permissions**: Full IAM access for user management operations
 - **Trust Policy**: Allows your master account user to assume the role
 - **External ID**: Account-specific external ID for security (`{AccountId}-iam-manager`)
