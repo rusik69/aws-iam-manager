@@ -49,6 +49,12 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		
 		// Public IP management routes
 		api.GET("/public-ips", s.handler.ListPublicIPs)
+		
+		// Cache management routes
+		api.POST("/cache/clear", s.handler.ClearCache)
+		api.POST("/cache/accounts/:accountId/invalidate", s.handler.InvalidateAccountCache)
+		api.POST("/cache/accounts/:accountId/users/:username/invalidate", s.handler.InvalidateUserCache)
+		api.POST("/cache/public-ips/invalidate", s.handler.InvalidatePublicIPsCache)
 	}
 
 	// Serve frontend

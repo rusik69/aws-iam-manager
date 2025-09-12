@@ -159,3 +159,26 @@ func (h *Handler) ListPublicIPs(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, ips)
 }
+
+func (h *Handler) ClearCache(c *gin.Context) {
+	h.awsService.ClearCache()
+	c.JSON(http.StatusOK, gin.H{"message": "Cache cleared successfully"})
+}
+
+func (h *Handler) InvalidateAccountCache(c *gin.Context) {
+	accountID := c.Param("accountId")
+	h.awsService.InvalidateAccountCache(accountID)
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Cache invalidated for account %s", accountID)})
+}
+
+func (h *Handler) InvalidateUserCache(c *gin.Context) {
+	accountID := c.Param("accountId")
+	username := c.Param("username")
+	h.awsService.InvalidateUserCache(accountID, username)
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Cache invalidated for user %s in account %s", username, accountID)})
+}
+
+func (h *Handler) InvalidatePublicIPsCache(c *gin.Context) {
+	h.awsService.InvalidatePublicIPsCache()
+	c.JSON(http.StatusOK, gin.H{"message": "Public IPs cache invalidated successfully"})
+}

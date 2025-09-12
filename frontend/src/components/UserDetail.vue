@@ -100,6 +100,12 @@
             <h3>Access Keys</h3>
           </div>
           <div class="card-actions">
+            <button @click="downloadAccessKeysJSON" class="btn btn-success btn-sm" :disabled="!user || (user.access_keys?.length || 0) === 0">
+              <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+              </svg>
+              Export JSON
+            </button>
             <button @click="createAccessKey" class="btn btn-primary" :disabled="creatingKey">
               <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
@@ -255,6 +261,13 @@ export default {
       }
     },
     async refreshUser() {
+      try {
+        // Invalidate cache for this user before refreshing
+        await axios.post(`/api/cache/accounts/${this.accountId}/users/${this.username}/invalidate`)
+      } catch (error) {
+        console.warn('Failed to invalidate user cache:', error)
+      }
+      
       await this.loadUser()
     },
     async createAccessKey() {
@@ -262,6 +275,14 @@ export default {
       try {
         const response = await axios.post(`/api/accounts/${this.accountId}/users/${this.username}/keys`)
         this.newKey = response.data
+        
+        // Explicitly invalidate cache to ensure fresh data on navigation back to AllUsers
+        try {
+          await axios.post(`/api/cache/accounts/${this.accountId}/invalidate`)
+        } catch (cacheErr) {
+          console.warn('Failed to invalidate account cache:', cacheErr)
+        }
+        
         await this.loadUser() // Refresh user data
       } catch (err) {
         alert(err.response?.data?.error || 'Failed to create access key')
@@ -275,6 +296,14 @@ export default {
       }
       try {
         await axios.delete(`/api/accounts/${this.accountId}/users/${this.username}/keys/${keyId}`)
+        
+        // Explicitly invalidate cache to ensure fresh data on navigation back to AllUsers
+        try {
+          await axios.post(`/api/cache/accounts/${this.accountId}/invalidate`)
+        } catch (cacheErr) {
+          console.warn('Failed to invalidate account cache:', cacheErr)
+        }
+        
         await this.loadUser() // Refresh user data
         alert('Access key deleted successfully')
       } catch (err) {
@@ -288,6 +317,14 @@ export default {
       try {
         const response = await axios.put(`/api/accounts/${this.accountId}/users/${this.username}/keys/${keyId}/rotate`)
         this.newKey = response.data
+        
+        // Explicitly invalidate cache to ensure fresh data on navigation back to AllUsers
+        try {
+          await axios.post(`/api/cache/accounts/${this.accountId}/invalidate`)
+        } catch (cacheErr) {
+          console.warn('Failed to invalidate account cache:', cacheErr)
+        }
+        
         await this.loadUser() // Refresh user data
       } catch (err) {
         alert(err.response?.data?.error || 'Failed to rotate access key')
@@ -353,6 +390,81 @@ export default {
         textArea.select()
         document.execCommand('copy')
         document.body.removeChild(textArea)
+      }
+    },
+
+    downloadAccessKeysJSON() {
+      try {
+        if (!this.user || !this.user.access_keys || this.user.access_keys.length === 0) {
+          alert('No access keys to export')
+          return
+        }
+
+        const exportData = {
+          exported_at: new Date().toISOString(),
+          user: {
+            username: this.user.username,
+            user_id: this.user.user_id,
+            arn: this.user.arn,
+            create_date: this.user.create_date,
+            password_set: this.user.password_set
+          },
+          account: {
+            id: this.accountId,
+            name: this.user.arn ? this.user.arn.split(':')[4] : this.accountId
+          },
+          access_keys: this.user.access_keys.map(key => ({
+            access_key_id: key.access_key_id,
+            status: key.status,
+            create_date: key.create_date
+          })),
+          total_keys: this.user.access_keys.length
+        }
+        
+        const dataStr = JSON.stringify(exportData, null, 2)
+        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr)
+        
+        const exportFileDefaultName = `aws-access-keys-${this.user.username}-${new Date().toISOString().split('T')[0]}.json`
+        
+        const linkElement = document.createElement('a')
+        linkElement.setAttribute('href', dataUri)
+        linkElement.setAttribute('download', exportFileDefaultName)
+        linkElement.click()
+      } catch (error) {
+        console.error('Failed to download JSON:', error)
+        alert('Failed to download JSON file')
+      }
+    },
+
+    async deleteUser() {
+      const confirmMessage = `Are you sure you want to DELETE the user "${this.username}"?\n\nThis will:\n1. Delete all access keys for this user\n2. Delete the user's login profile (if exists)\n3. Permanently delete the user\n\nThis action cannot be undone!`
+      
+      if (!confirm(confirmMessage)) return
+      
+      // Second confirmation for safety
+      const finalConfirmation = confirm(`FINAL CONFIRMATION:\nType "DELETE" to confirm deletion of user "${this.username}"`)
+      if (!finalConfirmation) return
+      
+      this.deletingUser = true
+      
+      try {
+        await axios.delete(`/api/accounts/${this.accountId}/users/${this.username}`)
+        
+        // Explicitly invalidate cache to ensure fresh data on navigation back to AllUsers
+        try {
+          await axios.post(`/api/cache/accounts/${this.accountId}/invalidate`)
+        } catch (cacheErr) {
+          console.warn('Failed to invalidate account cache:', cacheErr)
+        }
+        
+        alert(`User "${this.username}" has been successfully deleted.`)
+        // Navigate back to AllUsers page
+        this.$router.push('/')
+      } catch (error) {
+        console.error('Failed to delete user:', error)
+        alert(error.response?.data?.error || 'Failed to delete user. Please try again.')
+      } finally {
+        this.deletingUser = false
       }
     }
   }
@@ -721,12 +833,16 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: var(--spacing-md);
+  gap: var(--spacing-lg);
+  min-height: 4rem;
 }
 
 .key-info {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
+  flex: 1;
+  min-width: 0;
 }
 
 .key-id {
@@ -782,7 +898,8 @@ export default {
 
 .key-actions {
   display: flex;
-  gap: var(--spacing-xs);
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
 }
 
 /* Button Variants */
@@ -798,6 +915,17 @@ export default {
 
 .btn-warning:hover {
   background: var(--color-btn-warning-hover);
+}
+
+.btn-success {
+  background: #10b981;
+  color: white;
+  border: 1px solid #059669;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #059669;
+  border-color: #047857;
 }
 
 .btn-icon {

@@ -11,4 +11,9 @@ type AWSServiceInterface interface {
 	RotateAccessKey(accountID, username, keyID string) (map[string]any, error)
 	DeleteUser(accountID, username string) error
 	ListPublicIPs() ([]models.PublicIP, error)
+	// Cache management methods
+	ClearCache()
+	InvalidateAccountCache(accountID string)
+	InvalidateUserCache(accountID, username string)
+	InvalidatePublicIPsCache()
 }

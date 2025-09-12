@@ -3,8 +3,10 @@ package services
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/rusik69/aws-iam-manager/internal/config"
 	"github.com/rusik69/aws-iam-manager/internal/models"
@@ -13,15 +15,95 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/elb"
 	"github.com/aws/aws-sdk-go/service/elbv2"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/sts"
 )
 
+// CacheEntry represents a cached value with expiration
+type CacheEntry struct {
+	Data      interface{}
+	ExpiresAt time.Time
+}
+
+// Cache represents the caching layer
+type Cache struct {
+	mu    sync.RWMutex
+	items map[string]CacheEntry
+}
+
+// NewCache creates a new cache instance
+func NewCache() *Cache {
+	return &Cache{
+		items: make(map[string]CacheEntry),
+	}
+}
+
+// Get retrieves a value from cache
+func (c *Cache) Get(key string) (interface{}, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
+	entry, exists := c.items[key]
+	if !exists {
+		return nil, false
+	}
+	
+	if time.Now().After(entry.ExpiresAt) {
+		// Item has expired, clean it up
+		delete(c.items, key)
+		return nil, false
+	}
+	
+	return entry.Data, true
+}
+
+// Set stores a value in cache with TTL
+func (c *Cache) Set(key string, value interface{}, ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	c.items[key] = CacheEntry{
+		Data:      value,
+		ExpiresAt: time.Now().Add(ttl),
+	}
+}
+
+// Delete removes a value from cache
+func (c *Cache) Delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	delete(c.items, key)
+}
+
+// Clear removes all values from cache
+func (c *Cache) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	c.items = make(map[string]CacheEntry)
+}
+
+// DeletePattern removes all keys matching a pattern (simple prefix matching)
+func (c *Cache) DeletePattern(pattern string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	for key := range c.items {
+		if len(key) >= len(pattern) && key[:len(pattern)] == pattern {
+			delete(c.items, key)
+		}
+	}
+}
+
 type AWSService struct {
 	masterSession *session.Session
 	config        config.Config
+	cache         *Cache
+	cacheTTL      time.Duration
 }
 
 func NewAWSService(cfg config.Config) *AWSService {
@@ -44,6 +126,8 @@ func NewAWSService(cfg config.Config) *AWSService {
 	return &AWSService{
 		masterSession: sess,
 		config:        cfg,
+		cache:         NewCache(),
+		cacheTTL:      5 * time.Minute, // Default 5 minute TTL
 	}
 }
 
@@ -85,6 +169,15 @@ func (s *AWSService) getSessionForAccount(accountID string) (*session.Session, e
 }
 
 func (s *AWSService) ListAccounts() ([]models.Account, error) {
+	const cacheKey = "accounts"
+	
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if accounts, ok := cached.([]models.Account); ok {
+			return accounts, nil
+		}
+	}
+
 	orgClient := organizations.New(s.masterSession)
 	result, err := orgClient.ListAccounts(&organizations.ListAccountsInput{})
 	if err != nil {
@@ -103,6 +196,9 @@ func (s *AWSService) ListAccounts() ([]models.Account, error) {
 		})
 	}
 
+	// Cache the result
+	s.cache.Set(cacheKey, accounts, s.cacheTTL)
+	
 	return accounts, nil
 }
 
@@ -117,6 +213,15 @@ func (s *AWSService) testAccountAccess(accountID string) bool {
 }
 
 func (s *AWSService) ListUsers(accountID string) ([]models.User, error) {
+	cacheKey := fmt.Sprintf("users:%s", accountID)
+	
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if users, ok := cached.([]models.User); ok {
+			return users, nil
+		}
+	}
+
 	sess, err := s.getSessionForAccount(accountID)
 	if err != nil {
 		fmt.Printf("[WARNING] Cannot access account %s, skipping user listing: %v\n", accountID, err)
@@ -166,10 +271,22 @@ func (s *AWSService) ListUsers(accountID string) ([]models.User, error) {
 		})
 	}
 
+	// Cache the result
+	s.cache.Set(cacheKey, users, s.cacheTTL)
+	
 	return users, nil
 }
 
 func (s *AWSService) GetUser(accountID, username string) (*models.User, error) {
+	cacheKey := fmt.Sprintf("user:%s:%s", accountID, username)
+	
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if user, ok := cached.(*models.User); ok {
+			return user, nil
+		}
+	}
+
 	sess, err := s.getSessionForAccount(accountID)
 	if err != nil {
 		return nil, fmt.Errorf("cannot access account %s: %w", accountID, err)
@@ -218,6 +335,9 @@ func (s *AWSService) GetUser(accountID, username string) (*models.User, error) {
 		AccessKeys:  accessKeys,
 	}
 
+	// Cache the result
+	s.cache.Set(cacheKey, userResponse, s.cacheTTL)
+
 	return userResponse, nil
 }
 
@@ -234,6 +354,12 @@ func (s *AWSService) CreateAccessKey(accountID, username string) (map[string]any
 	if err != nil {
 		return nil, err
 	}
+
+	// Invalidate related cache entries
+	s.cache.Delete(fmt.Sprintf("user:%s:%s", accountID, username))
+	s.cache.Delete(fmt.Sprintf("users:%s", accountID))
+	// Also invalidate accounts cache in case it includes user/key counts
+	s.cache.Delete("accounts")
 
 	key := result.AccessKey
 	response := map[string]any{
@@ -257,6 +383,15 @@ func (s *AWSService) DeleteAccessKey(accountID, username, keyID string) error {
 		UserName:    aws.String(username),
 		AccessKeyId: aws.String(keyID),
 	})
+	
+	if err == nil {
+		// Invalidate related cache entries
+		s.cache.Delete(fmt.Sprintf("user:%s:%s", accountID, username))
+		s.cache.Delete(fmt.Sprintf("users:%s", accountID))
+		// Also invalidate accounts cache in case it includes user/key counts
+		s.cache.Delete("accounts")
+	}
+	
 	return err
 }
 
@@ -289,6 +424,12 @@ func (s *AWSService) RotateAccessKey(accountID, username, keyID string) (map[str
 		})
 		return nil, fmt.Errorf("failed to delete old key: %v", err)
 	}
+
+	// Invalidate related cache entries
+	s.cache.Delete(fmt.Sprintf("user:%s:%s", accountID, username))
+	s.cache.Delete(fmt.Sprintf("users:%s", accountID))
+	// Also invalidate accounts cache in case it includes user/key counts
+	s.cache.Delete("accounts")
 
 	key := createResult.AccessKey
 	response := map[string]any{
@@ -360,10 +501,25 @@ func (s *AWSService) DeleteUser(accountID, username string) error {
 		return fmt.Errorf("failed to delete user: %v", err)
 	}
 
+	// Invalidate related cache entries
+	s.cache.Delete(fmt.Sprintf("user:%s:%s", accountID, username))
+	s.cache.Delete(fmt.Sprintf("users:%s", accountID))
+	// Also invalidate accounts cache in case it includes user/key counts
+	s.cache.Delete("accounts")
+
 	return nil
 }
 
 func (s *AWSService) ListPublicIPs() ([]models.PublicIP, error) {
+	const cacheKey = "public-ips"
+	
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if ips, ok := cached.([]models.PublicIP); ok {
+			return ips, nil
+		}
+	}
+
 	accounts, err := s.ListAccounts()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list accounts: %v", err)
@@ -424,7 +580,36 @@ func (s *AWSService) ListPublicIPs() ([]models.PublicIP, error) {
 		allIPs = append(allIPs, result.ips...)
 	}
 
+	// Cache the result
+	s.cache.Set(cacheKey, allIPs, s.cacheTTL)
+
 	return allIPs, nil
+}
+
+// ClearCache clears all cached data
+func (s *AWSService) ClearCache() {
+	s.cache.Clear()
+}
+
+// InvalidateAccountCache invalidates cache entries for a specific account
+func (s *AWSService) InvalidateAccountCache(accountID string) {
+	s.cache.Delete(fmt.Sprintf("users:%s", accountID))
+	s.cache.DeletePattern(fmt.Sprintf("user:%s:", accountID))
+	// Also invalidate accounts cache
+	s.cache.Delete("accounts")
+}
+
+// InvalidateUserCache invalidates cache entries for a specific user
+func (s *AWSService) InvalidateUserCache(accountID, username string) {
+	s.cache.Delete(fmt.Sprintf("user:%s:%s", accountID, username))
+	s.cache.Delete(fmt.Sprintf("users:%s", accountID))
+	// Also invalidate accounts cache in case it includes user/key counts
+	s.cache.Delete("accounts")
+}
+
+// InvalidatePublicIPsCache invalidates the public IPs cache
+func (s *AWSService) InvalidatePublicIPsCache() {
+	s.cache.Delete("public-ips")
 }
 
 func (s *AWSService) getPublicIPsForAccount(account models.Account) ([]models.PublicIP, error) {
@@ -547,6 +732,28 @@ func (s *AWSService) getEC2PublicIPs(sess *session.Session, account models.Accou
 }
 
 func (s *AWSService) getELBPublicIPs(sess *session.Session, account models.Account, region string) ([]models.PublicIP, error) {
+	var ips []models.PublicIP
+
+	// Get ALB/NLB (ELBv2)
+	elbv2IPs, err := s.getELBv2PublicIPs(sess, account, region)
+	if err != nil {
+		fmt.Printf("[WARNING] Failed to get ELBv2 IPs in region %s for account %s: %v\n", region, account.ID, err)
+	} else {
+		ips = append(ips, elbv2IPs...)
+	}
+
+	// Get Classic Load Balancers (ELBv1)
+	elbv1IPs, err := s.getClassicELBPublicIPs(sess, account, region)
+	if err != nil {
+		fmt.Printf("[WARNING] Failed to get Classic ELB IPs in region %s for account %s: %v\n", region, account.ID, err)
+	} else {
+		ips = append(ips, elbv1IPs...)
+	}
+
+	return ips, nil
+}
+
+func (s *AWSService) getELBv2PublicIPs(sess *session.Session, account models.Account, region string) ([]models.PublicIP, error) {
 	elbClient := elbv2.New(sess)
 	var ips []models.PublicIP
 
@@ -556,10 +763,14 @@ func (s *AWSService) getELBPublicIPs(sess *session.Session, account models.Accou
 	}
 
 	for _, lb := range result.LoadBalancers {
-		if lb.Scheme != nil && *lb.Scheme == "internet-facing" {
-			// Get load balancer IPs by resolving DNS name
-			// For ALB/NLB, we can get the IP addresses from network interfaces
-			if lb.IpAddressType != nil {
+		if lb.Scheme != nil && *lb.Scheme == "internet-facing" && lb.DNSName != nil {
+			lbType := "ALB"
+			if lb.Type != nil {
+				lbType = string(*lb.Type)
+			}
+
+			// For NLB with static IPs, try to get them directly
+			if lb.Type != nil && *lb.Type == "network" {
 				for _, az := range lb.AvailabilityZones {
 					if az.LoadBalancerAddresses != nil {
 						for _, addr := range az.LoadBalancerAddresses {
@@ -569,7 +780,7 @@ func (s *AWSService) getELBPublicIPs(sess *session.Session, account models.Accou
 									AccountID:    account.ID,
 									AccountName:  account.Name,
 									Region:       region,
-									ResourceType: string(*lb.Type),
+									ResourceType: "NLB",
 									ResourceID:   *lb.LoadBalancerArn,
 									ResourceName: *lb.LoadBalancerName,
 									State:        string(*lb.State.Code),
@@ -579,10 +790,85 @@ func (s *AWSService) getELBPublicIPs(sess *session.Session, account models.Accou
 					}
 				}
 			}
+
+			// For ALB and NLB without static IPs, resolve DNS name
+			if len(ips) == 0 || (lb.Type != nil && *lb.Type != "network") {
+				resolvedIPs, err := s.resolveDNSToIPs(*lb.DNSName)
+				if err != nil {
+					fmt.Printf("[WARNING] Failed to resolve DNS %s: %v\n", *lb.DNSName, err)
+					continue
+				}
+
+				for _, ip := range resolvedIPs {
+					ips = append(ips, models.PublicIP{
+						IPAddress:    ip,
+						AccountID:    account.ID,
+						AccountName:  account.Name,
+						Region:       region,
+						ResourceType: lbType,
+						ResourceID:   *lb.LoadBalancerArn,
+						ResourceName: *lb.LoadBalancerName,
+						State:        string(*lb.State.Code),
+					})
+				}
+			}
 		}
 	}
 
 	return ips, nil
+}
+
+func (s *AWSService) getClassicELBPublicIPs(sess *session.Session, account models.Account, region string) ([]models.PublicIP, error) {
+	// Import classic ELB package
+	elbClient := elb.New(sess)
+	var ips []models.PublicIP
+
+	result, err := elbClient.DescribeLoadBalancers(&elb.DescribeLoadBalancersInput{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, lb := range result.LoadBalancerDescriptions {
+		if lb.Scheme != nil && *lb.Scheme == "internet-facing" && lb.DNSName != nil {
+			// Resolve DNS name to get IP addresses
+			resolvedIPs, err := s.resolveDNSToIPs(*lb.DNSName)
+			if err != nil {
+				fmt.Printf("[WARNING] Failed to resolve DNS %s: %v\n", *lb.DNSName, err)
+				continue
+			}
+
+			for _, ip := range resolvedIPs {
+				ips = append(ips, models.PublicIP{
+					IPAddress:    ip,
+					AccountID:    account.ID,
+					AccountName:  account.Name,
+					Region:       region,
+					ResourceType: "ELB",
+					ResourceID:   *lb.LoadBalancerName, // Classic ELB doesn't have ARN
+					ResourceName: *lb.LoadBalancerName,
+					State:        "active", // Classic ELB doesn't have detailed state
+				})
+			}
+		}
+	}
+
+	return ips, nil
+}
+
+func (s *AWSService) resolveDNSToIPs(dnsName string) ([]string, error) {
+	ips, err := net.LookupIP(dnsName)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []string
+	for _, ip := range ips {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			result = append(result, ipv4.String())
+		}
+	}
+
+	return result, nil
 }
 
 func (s *AWSService) getNATPublicIPs(sess *session.Session, account models.Account, region string) ([]models.PublicIP, error) {

@@ -19,17 +19,33 @@
 
     <div v-else class="content">
       <div class="summary">
-        <div class="summary-item">
-          <span class="label">Total IPs:</span>
-          <span class="value">{{ publicIPs.length }}</span>
+        <div class="summary-stats">
+          <div class="summary-item">
+            <span class="label">Total IPs:</span>
+            <span class="value">{{ publicIPs.length }}</span>
+          </div>
+          <div class="summary-item">
+            <span class="label">Accounts:</span>
+            <span class="value">{{ uniqueAccounts.length }}</span>
+          </div>
+          <div class="summary-item">
+            <span class="label">Regions:</span>
+            <span class="value">{{ uniqueRegions.length }}</span>
+          </div>
         </div>
-        <div class="summary-item">
-          <span class="label">Accounts:</span>
-          <span class="value">{{ uniqueAccounts.length }}</span>
-        </div>
-        <div class="summary-item">
-          <span class="label">Regions:</span>
-          <span class="value">{{ uniqueRegions.length }}</span>
+        <div class="summary-actions">
+          <button @click="refreshData" class="btn btn-secondary" :disabled="loading">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+            </svg>
+            {{ loading ? 'Refreshing...' : 'Refresh' }}
+          </button>
+          <button @click="downloadIPsJSON" class="btn btn-success" :disabled="loading || publicIPs.length === 0">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+            </svg>
+            Download JSON
+          </button>
         </div>
       </div>
 
@@ -251,6 +267,20 @@ export default {
         this.loading = false
       }
     },
+    
+    async refreshData() {
+      try {
+        // Invalidate public IPs cache before refreshing
+        const response = await fetch('/api/cache/public-ips/invalidate', { method: 'POST' })
+        if (!response.ok) {
+          console.warn('Failed to invalidate cache')
+        }
+      } catch (error) {
+        console.warn('Failed to invalidate public IPs cache:', error)
+      }
+      
+      await this.loadPublicIPs()
+    },
     sortBy(field) {
       if (this.sortField === field) {
         this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc'
@@ -262,6 +292,38 @@ export default {
     ipToNumber(ip) {
       // Convert IP address to number for proper sorting
       return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0)
+    },
+
+    downloadIPsJSON() {
+      try {
+        const exportData = {
+          exported_at: new Date().toISOString(),
+          total_ips: this.filteredAndSortedIPs.length,
+          unique_accounts: this.uniqueAccounts.length,
+          unique_regions: this.uniqueRegions.length,
+          filters: {
+            search_query: this.searchQuery,
+            account_filter: this.filterAccount,
+            resource_type_filter: this.filterResourceType,
+            region_filter: this.filterRegion
+          },
+          accounts: this.uniqueAccounts,
+          public_ips: this.filteredAndSortedIPs
+        }
+        
+        const dataStr = JSON.stringify(exportData, null, 2)
+        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr)
+        
+        const exportFileDefaultName = `aws-public-ips-${new Date().toISOString().split('T')[0]}.json`
+        
+        const linkElement = document.createElement('a')
+        linkElement.setAttribute('href', dataUri)
+        linkElement.setAttribute('download', exportFileDefaultName)
+        linkElement.click()
+      } catch (error) {
+        console.error('Failed to download JSON:', error)
+        alert('Failed to download JSON file')
+      }
     }
   },
   async mounted() {
@@ -348,12 +410,24 @@ h1 {
 
 .summary {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 2rem;
   margin-bottom: 2rem;
   padding: 1rem;
   background: #f7fafc;
   border-radius: 8px;
   border: 1px solid #e2e8f0;
+}
+
+.summary-stats {
+  display: flex;
+  gap: 2rem;
+}
+
+.summary-actions {
+  display: flex;
+  gap: 1rem;
 }
 
 .summary-item {
@@ -522,6 +596,53 @@ h1 {
   text-align: center;
   padding: 2rem;
   color: #718096;
+}
+
+/* Button Styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: #f9fafb;
+  color: #6b7280;
+  border: 1px solid #e5e7eb;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+.btn-success {
+  background: #10b981;
+  color: white;
+  border: 1px solid #059669;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #059669;
+  border-color: #047857;
+}
+
+.btn-icon {
+  width: 1rem;
+  height: 1rem;
 }
 
 @media (max-width: 768px) {

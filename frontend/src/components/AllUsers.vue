@@ -16,6 +16,12 @@
           </div>
         </div>
         <div class="header-actions">
+          <button @click="downloadUsersJSON" class="btn btn-success" :disabled="loading || allUsers.length === 0">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+            </svg>
+            Download JSON
+          </button>
           <button @click="refreshData" class="btn btn-secondary" :disabled="loading">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
               <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
@@ -102,7 +108,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="user in filteredUsers" :key="`${user.accountId}-${user.username}`" class="user-row">
+            <tr v-for="user in filteredUsers" :key="`${user.accountId}-${user.username}`" class="user-row clickable" @click="viewUser(user.accountId, user.username)">
               <td>
                 <div class="user-info">
                   <div class="user-name">{{ user.username }}</div>
@@ -141,16 +147,7 @@
               <td>
                 <div class="user-actions">
                   <button 
-                    @click="viewUser(user.accountId, user.username)"
-                    class="btn btn-sm btn-primary"
-                  >
-                    <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
-                    </svg>
-                    View
-                  </button>
-                  <button 
-                    @click="deleteUser(user.accountId, user.username)"
+                    @click.stop="deleteUser(user.accountId, user.username)"
                     class="btn btn-sm btn-danger"
                     :disabled="actionLoading[`${user.accountId}-${user.username}`]"
                   >
@@ -260,6 +257,28 @@ export default {
   async mounted() {
     await this.loadData()
   },
+  // Watch for route changes to refresh data when navigating back to this component
+  watch: {
+    '$route'(to, from) {
+      // If we're navigating back to AllUsers from a UserDetail page
+      if (to.path === '/' && from.path && from.path.includes('/accounts/') && from.path.includes('/users/')) {
+        console.log('Navigating back from UserDetail to AllUsers')
+        // Extract account ID from the previous route if possible
+        const accountMatch = from.path.match(/\/accounts\/([^\/]+)\//)
+        if (accountMatch) {
+          const accountId = accountMatch[1]
+          console.log(`Invalidating cache for account ${accountId} and refreshing in background`)
+          this.invalidateAccountAndRefresh(accountId)
+        } else {
+          // Fallback: just refresh data normally (it will use cache where possible)
+          this.loadData()
+        }
+      } else if (to.path === '/') {
+        // For other navigation to AllUsers, just load normally (use cache if available)
+        this.loadData()
+      }
+    }
+  },
   methods: {
     async loadData() {
       try {
@@ -314,8 +333,74 @@ export default {
     },
     
     async refreshData() {
+      try {
+        // Clear cache before refreshing
+        await axios.post('/api/cache/clear')
+      } catch (error) {
+        console.warn('Failed to clear cache:', error)
+      }
+      
       this.allUsers = []
       await this.loadData()
+    },
+
+    async backgroundRefresh() {
+      // If we don't have any data, show loading and do full refresh
+      if (!this.allUsers || this.allUsers.length === 0) {
+        console.log('No cached data available, doing full refresh')
+        await this.refreshData()
+        return
+      }
+
+      try {
+        console.log('Refreshing data in background while showing cached data')
+        
+        // Invalidate cache to get fresh data
+        await axios.post('/api/cache/clear')
+        
+        // Load accounts first
+        const accountsResponse = await axios.get('/api/accounts')
+        this.accounts = accountsResponse.data
+        
+        // Load users for all accounts in background
+        await this.loadAllUsers()
+        
+        console.log('Background refresh completed - data updated')
+        
+      } catch (err) {
+        console.warn('Background refresh failed:', err)
+        // Keep showing the cached data even if refresh fails
+      }
+    },
+
+    async invalidateAccountAndRefresh(accountId) {
+      try {
+        // Only invalidate the specific account's cache - this is more efficient
+        await axios.post(`/api/cache/accounts/${accountId}/invalidate`)
+        console.log(`Invalidated cache for account ${accountId}`)
+        
+        // If we have existing data, load fresh data without showing loading spinner
+        if (this.allUsers && this.allUsers.length > 0) {
+          console.log('Loading fresh data in background')
+          
+          // Refresh accounts (quick, usually cached)
+          const accountsResponse = await axios.get('/api/accounts')
+          this.accounts = accountsResponse.data
+          
+          // Reload all users (the modified account will be fresh, others may use cache)
+          await this.loadAllUsers()
+          
+          console.log('Account-specific refresh completed')
+        } else {
+          // No existing data, do full load with loading state
+          await this.loadData()
+        }
+        
+      } catch (err) {
+        console.warn('Account invalidation failed:', err)
+        // Fallback to normal load
+        await this.loadData()
+      }
     },
     
     getOldKeyCount(user) {
@@ -377,6 +462,35 @@ export default {
         alert(error.response?.data?.error || 'Failed to delete user. Please try again.')
       } finally {
         delete this.actionLoading[loadingKey]
+      }
+    },
+
+    downloadUsersJSON() {
+      try {
+        const exportData = {
+          exported_at: new Date().toISOString(),
+          total_users: this.filteredUsers.length,
+          total_accounts: this.accounts.length,
+          accounts: this.accounts.map(account => ({
+            id: account.id,
+            name: account.name,
+            accessible: account.accessible
+          })),
+          users: this.filteredUsers
+        }
+        
+        const dataStr = JSON.stringify(exportData, null, 2)
+        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr)
+        
+        const exportFileDefaultName = `aws-iam-users-${new Date().toISOString().split('T')[0]}.json`
+        
+        const linkElement = document.createElement('a')
+        linkElement.setAttribute('href', dataUri)
+        linkElement.setAttribute('download', exportFileDefaultName)
+        linkElement.click()
+      } catch (error) {
+        console.error('Failed to download JSON:', error)
+        alert('Failed to download JSON file')
       }
     }
   }
@@ -616,8 +730,15 @@ export default {
   vertical-align: top;
 }
 
-.user-row:hover {
+.user-row.clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.user-row.clickable:hover {
   background: var(--color-bg-secondary, #f9fafb);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
 
 .user-info,
@@ -736,6 +857,17 @@ export default {
 .btn-secondary:hover:not(:disabled) {
   background: var(--color-bg-tertiary, #f3f4f6);
   color: var(--color-text-primary, #1f2937);
+}
+
+.btn-success {
+  background: #10b981;
+  color: white;
+  border: 1px solid #059669;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #059669;
+  border-color: #047857;
 }
 
 .btn-sm {
@@ -889,8 +1021,9 @@ export default {
   border-color: #30363d;
 }
 
-.dark .user-row:hover {
+.dark .user-row.clickable:hover {
   background: #161b22;
+  box-shadow: 0 4px 6px -1px rgba(255, 255, 255, 0.05), 0 2px 4px -1px rgba(255, 255, 255, 0.03);
 }
 
 .dark .user-id,
@@ -908,6 +1041,15 @@ export default {
 
 .dark .btn-secondary:hover:not(:disabled) {
   background: #30363d;
+}
+
+.dark .btn-success {
+  background: #047857;
+  border-color: #065f46;
+}
+
+.dark .btn-success:hover:not(:disabled) {
+  background: #065f46;
 }
 
 .dark .empty-results,
