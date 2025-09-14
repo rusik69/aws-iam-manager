@@ -43,6 +43,8 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.GET("/accounts/:accountId/users", s.handler.ListUsers)
 		api.GET("/accounts/:accountId/users/:username", s.handler.GetUser)
 		api.DELETE("/accounts/:accountId/users/:username", s.handler.DeleteUser)
+		api.DELETE("/accounts/:accountId/users/:username/password", s.handler.DeleteUserPassword)
+		api.POST("/accounts/:accountId/users/:username/password/rotate", s.handler.RotateUserPassword)
 		api.POST("/accounts/:accountId/users/:username/keys", s.handler.CreateAccessKey)
 		api.DELETE("/accounts/:accountId/users/:username/keys/:keyId", s.handler.DeleteAccessKey)
 		api.PUT("/accounts/:accountId/users/:username/keys/:keyId/rotate", s.handler.RotateAccessKey)

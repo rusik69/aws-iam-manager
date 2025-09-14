@@ -137,3 +137,5 @@ temp/
 *.njsproj
 *.sln
 *.sw?
+
+aws-iam-manager

@@ -2,7 +2,9 @@
 package services
 
 import (
+	"crypto/rand"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"sync"
@@ -612,6 +614,94 @@ func (s *AWSService) InvalidatePublicIPsCache() {
 	s.cache.Delete("public-ips")
 }
 
+func (s *AWSService) DeleteUserPassword(accountID, username string) error {
+	sess, err := s.getSessionForAccount(accountID)
+	if err != nil {
+		return fmt.Errorf("cannot access account %s: %w", accountID, err)
+	}
+
+	iamClient := iam.New(sess)
+
+	// Delete the login profile (console password)
+	_, err = iamClient.DeleteLoginProfile(&iam.DeleteLoginProfileInput{
+		UserName: aws.String(username),
+	})
+	if err != nil {
+		// Check if it's because the login profile doesn't exist
+		if awsErr, ok := err.(interface{ Code() string }); ok && awsErr.Code() == "NoSuchEntity" {
+			return fmt.Errorf("user %s does not have a console password", username)
+		}
+		return fmt.Errorf("failed to delete user password: %v", err)
+	}
+
+	// Invalidate related cache entries
+	s.cache.Delete(fmt.Sprintf("user:%s:%s", accountID, username))
+	s.cache.Delete(fmt.Sprintf("users:%s", accountID))
+	// Also invalidate accounts cache in case it includes user/password counts
+	s.cache.Delete("accounts")
+
+	return nil
+}
+
+func (s *AWSService) RotateUserPassword(accountID, username string) (map[string]any, error) {
+	sess, err := s.getSessionForAccount(accountID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot access account %s: %w", accountID, err)
+	}
+
+	iamClient := iam.New(sess)
+
+	// Check if user already has a login profile
+	hasLoginProfile := true
+	_, err = iamClient.GetLoginProfile(&iam.GetLoginProfileInput{
+		UserName: aws.String(username),
+	})
+	if err != nil {
+		if awsErr, ok := err.(interface{ Code() string }); ok && awsErr.Code() == "NoSuchEntity" {
+			hasLoginProfile = false
+		} else {
+			return nil, fmt.Errorf("failed to check login profile: %v", err)
+		}
+	}
+
+	// Generate a new password
+	newPassword := s.generatePassword()
+
+	if hasLoginProfile {
+		// Update existing login profile
+		_, err = iamClient.UpdateLoginProfile(&iam.UpdateLoginProfileInput{
+			UserName: aws.String(username),
+			Password: aws.String(newPassword),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to update user password: %v", err)
+		}
+	} else {
+		// Create new login profile
+		_, err = iamClient.CreateLoginProfile(&iam.CreateLoginProfileInput{
+			UserName: aws.String(username),
+			Password: aws.String(newPassword),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create user password: %v", err)
+		}
+	}
+
+	// Invalidate related cache entries
+	s.cache.Delete(fmt.Sprintf("user:%s:%s", accountID, username))
+	s.cache.Delete(fmt.Sprintf("users:%s", accountID))
+	// Also invalidate accounts cache in case it includes user/password counts
+	s.cache.Delete("accounts")
+
+	response := map[string]any{
+		"message":      "User password rotated successfully",
+		"new_password": newPassword,
+		"username":     username,
+	}
+
+	return response, nil
+}
+
 func (s *AWSService) getPublicIPsForAccount(account models.Account) ([]models.PublicIP, error) {
 	sess, err := s.getSessionForAccount(account.ID)
 	if err != nil {
@@ -906,4 +996,41 @@ func (s *AWSService) getNATPublicIPs(sess *session.Session, account models.Accou
 	}
 
 	return ips, nil
+}
+
+// generatePassword generates a secure random password
+func (s *AWSService) generatePassword() string {
+	// AWS password requirements: 8-128 characters, at least 3 of 4 character types
+	// (uppercase, lowercase, numbers, symbols)
+	const (
+		length    = 16
+		uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		lowercase = "abcdefghijklmnopqrstuvwxyz"
+		numbers   = "0123456789"
+		symbols   = "!@#$%^&*"
+	)
+
+	allChars := uppercase + lowercase + numbers + symbols
+	password := make([]byte, length)
+
+	// Ensure at least one character from each type
+	charSets := []string{uppercase, lowercase, numbers, symbols}
+	for i, charset := range charSets {
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		password[i] = charset[n.Int64()]
+	}
+
+	// Fill the rest with random characters
+	for i := len(charSets); i < length; i++ {
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(allChars))))
+		password[i] = allChars[n.Int64()]
+	}
+
+	// Shuffle the password to avoid predictable patterns
+	for i := length - 1; i > 0; i-- {
+		j, _ := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		password[i], password[j.Int64()] = password[j.Int64()], password[i]
+	}
+
+	return string(password)
 }

@@ -3,9 +3,13 @@
     <div class="card">
       <nav>
         <router-link to="/">← All Users</router-link> / 
+        <span v-if="account">{{ account.name }}</span><span v-else>{{ accountId }}</span> / 
         {{ username }}
       </nav>
-      <h2>User Details: {{ username }}</h2>
+      <h2>
+        User Details: {{ username }}
+        <span v-if="account" class="account-subtitle">in {{ account.name }}</span>
+      </h2>
       <div class="header-actions">
         <button @click="refreshUser" class="btn btn-secondary">
           <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
@@ -39,13 +43,40 @@
             <h3>User Information</h3>
           </div>
           <div class="user-status">
-            <span :class="['status-badge', user?.password_set ? 'status-success' : 'status-warning']">
-              <svg class="status-icon" viewBox="0 0 24 24" fill="currentColor">
-                <path v-if="user?.password_set" d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-                <path v-else d="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z"/>
-              </svg>
-              {{ user?.password_set ? 'Password Set' : 'No Password' }}
-            </span>
+            <div class="password-status-container">
+              <span :class="['status-badge', user?.password_set ? 'status-success' : 'status-warning']">
+                <svg class="status-icon" viewBox="0 0 24 24" fill="currentColor">
+                  <path v-if="user?.password_set" d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+                  <path v-else d="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z"/>
+                </svg>
+                {{ user?.password_set ? 'Password Set' : 'No Password' }}
+              </span>
+              <div class="password-actions">
+                <button
+                  @click="rotateUserPassword"
+                  class="btn btn-primary btn-xs"
+                  :disabled="rotatingPassword"
+                  :title="user?.password_set ? 'Rotate console password' : 'Create console password'"
+                >
+                  <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+                  </svg>
+                  {{ rotatingPassword ? (user?.password_set ? 'Rotating...' : 'Creating...') : (user?.password_set ? 'Rotate' : 'Create') }}
+                </button>
+                <button
+                  v-if="user?.password_set"
+                  @click="removeUserPassword"
+                  class="btn btn-warning btn-xs"
+                  :disabled="removingPassword"
+                  title="Remove console password"
+                >
+                  <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                  </svg>
+                  {{ removingPassword ? 'Removing...' : 'Remove' }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="card-body">
@@ -53,6 +84,15 @@
             <div class="info-item">
               <div class="info-label">Username</div>
               <div class="info-value user-name">{{ user?.username || 'N/A' }}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">Account</div>
+              <div class="info-value">
+                <div class="account-info">
+                  <div class="account-name">{{ account?.name || 'Loading...' }}</div>
+                  <code class="account-id">{{ account?.id || accountId }}</code>
+                </div>
+              </div>
             </div>
             <div class="info-item">
               <div class="info-label">User ID</div>
@@ -237,11 +277,14 @@ export default {
   data() {
     return {
       user: null,
+      account: null,
       loading: true,
       error: null,
       creatingKey: false,
       newKey: null,
-      deletingUser: false
+      deletingUser: false,
+      removingPassword: false,
+      rotatingPassword: false
     }
   },
   async mounted() {
@@ -252,8 +295,23 @@ export default {
       try {
         this.loading = true
         this.error = null
-        const response = await axios.get(`/api/accounts/${this.accountId}/users/${this.username}`)
-        this.user = response.data
+        
+        // Load user data and accounts in parallel
+        const [userResponse, accountsResponse] = await Promise.all([
+          axios.get(`/api/accounts/${this.accountId}/users/${this.username}`),
+          axios.get('/api/accounts')
+        ])
+        
+        this.user = userResponse.data
+        
+        // Find the account information
+        const accounts = accountsResponse.data
+        this.account = accounts.find(acc => acc.id === this.accountId) || {
+          id: this.accountId,
+          name: 'Unknown Account',
+          accessible: false
+        }
+        
       } catch (err) {
         this.error = err.response?.data?.error || 'Failed to load user'
       } finally {
@@ -466,6 +524,63 @@ export default {
       } finally {
         this.deletingUser = false
       }
+    },
+
+    async removeUserPassword() {
+      const confirmMessage = `Are you sure you want to remove the console password for user "${this.username}"?\n\nThis will:\n1. Delete the user's console login password\n2. Prevent the user from logging into the AWS Console\n3. Not affect programmatic access (access keys)\n\nThis action cannot be undone!`
+
+      if (!confirm(confirmMessage)) return
+
+      this.removingPassword = true
+
+      try {
+        await axios.delete(`/api/accounts/${this.accountId}/users/${this.username}/password`)
+
+        // Explicitly invalidate cache to ensure fresh data on navigation back to AllUsers
+        try {
+          await axios.post(`/api/cache/accounts/${this.accountId}/invalidate`)
+        } catch (cacheErr) {
+          console.warn('Failed to invalidate account cache:', cacheErr)
+        }
+
+        alert(`Console password for user "${this.username}" has been successfully removed.`)
+        await this.loadUser() // Refresh user data to show updated password status
+      } catch (error) {
+        console.error('Failed to remove user password:', error)
+        alert(error.response?.data?.error || 'Failed to remove user password. Please try again.')
+      } finally {
+        this.removingPassword = false
+      }
+    },
+
+    async rotateUserPassword() {
+      const confirmMessage = `Are you sure you want to rotate the console password for user "${this.username}"?\n\nThis will:\n1. Generate a new random console password\n2. ${this.user?.password_set ? 'Replace the existing password' : 'Create a new password'}\n3. Display the new password once (save it immediately)\n\nContinue?`
+
+      if (!confirm(confirmMessage)) return
+
+      this.rotatingPassword = true
+
+      try {
+        const response = await axios.post(`/api/accounts/${this.accountId}/users/${this.username}/password/rotate`)
+
+        // Explicitly invalidate cache to ensure fresh data on navigation back to AllUsers
+        try {
+          await axios.post(`/api/cache/accounts/${this.accountId}/invalidate`)
+        } catch (cacheErr) {
+          console.warn('Failed to invalidate account cache:', cacheErr)
+        }
+
+        // Show the new password in an alert
+        const newPassword = response.data.new_password
+        alert(`New password for user "${this.username}":\n\n${newPassword}\n\nSave this password now! This is the only time it will be displayed.`)
+
+        await this.loadUser() // Refresh user data to show updated password status
+      } catch (error) {
+        console.error('Failed to rotate user password:', error)
+        alert(error.response?.data?.error || 'Failed to rotate user password. Please try again.')
+      } finally {
+        this.rotatingPassword = false
+      }
     }
   }
 }
@@ -497,6 +612,13 @@ export default {
   background: var(--color-bg-primary);
   border-radius: var(--radius-lg);
   box-shadow: 0 2px 8px var(--color-shadow-light);
+}
+
+.account-subtitle {
+  font-size: 1rem;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  margin-left: 0.5rem;
 }
 
 .header-content {
@@ -654,6 +776,18 @@ export default {
 }
 
 /* User Status Badge */
+.password-status-container {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.password-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
 .user-status .status-badge {
   display: flex;
   align-items: center;
@@ -726,6 +860,29 @@ export default {
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border-light);
   display: inline-block;
+}
+
+.account-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.account-name {
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.account-id {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.75rem;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-light);
+  display: inline-block;
+  width: fit-content;
 }
 
 .arn {
@@ -821,6 +978,7 @@ export default {
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md);
   transition: all var(--transition-normal);
+  margin-bottom: var(--spacing-xs);
 }
 
 .key-item:hover {
@@ -832,15 +990,15 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--spacing-md);
-  gap: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  gap: var(--spacing-xl);
   min-height: 4rem;
 }
 
 .key-info {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
+  gap: var(--spacing-sm);
   flex: 1;
   min-width: 0;
 }
@@ -848,7 +1006,7 @@ export default {
 .key-id {
   display: flex;
   align-items: center;
-  gap: var(--spacing-xs);
+  gap: var(--spacing-sm);
   font-weight: 500;
 }
 
@@ -898,7 +1056,7 @@ export default {
 
 .key-actions {
   display: flex;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-lg);
   flex-shrink: 0;
 }
 
@@ -906,6 +1064,12 @@ export default {
 .btn-sm {
   font-size: 0.75rem;
   padding: var(--spacing-xs) var(--spacing-sm);
+}
+
+.btn-xs {
+  font-size: 0.625rem;
+  padding: 0.25rem 0.5rem;
+  gap: 0.25rem;
 }
 
 .btn-warning {
@@ -1217,10 +1381,12 @@ export default {
     flex-direction: column;
     gap: var(--spacing-md);
     align-items: stretch;
+    padding: var(--spacing-md);
   }
-  
+
   .key-actions {
     justify-content: center;
+    gap: var(--spacing-md);
   }
   
   .modern-modal {

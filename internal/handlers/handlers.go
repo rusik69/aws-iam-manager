@@ -147,6 +147,38 @@ func (h *Handler) DeleteUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
 }
 
+func (h *Handler) DeleteUserPassword(c *gin.Context) {
+	accountID := c.Param("accountId")
+	username := c.Param("username")
+	err := h.awsService.DeleteUserPassword(accountID, username)
+	if err != nil {
+		// Log the full error for debugging
+		fmt.Printf("[ERROR] DeleteUserPassword failed for user %s in account %s: %v\n", username, accountID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": fmt.Sprintf("Failed to delete password for user %s in account %s. %s", username, accountID, err.Error()),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "User password deleted successfully"})
+}
+
+func (h *Handler) RotateUserPassword(c *gin.Context) {
+	accountID := c.Param("accountId")
+	username := c.Param("username")
+	response, err := h.awsService.RotateUserPassword(accountID, username)
+	if err != nil {
+		// Log the full error for debugging
+		fmt.Printf("[ERROR] RotateUserPassword failed for user %s in account %s: %v\n", username, accountID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": fmt.Sprintf("Failed to rotate password for user %s in account %s. %s", username, accountID, err.Error()),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, response)
+}
+
 func (h *Handler) ListPublicIPs(c *gin.Context) {
 	ips, err := h.awsService.ListPublicIPs()
 	if err != nil {

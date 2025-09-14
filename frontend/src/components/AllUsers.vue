@@ -122,13 +122,37 @@
                 </div>
               </td>
               <td>
-                <span :class="['password-status', user.password_set ? 'has-password' : 'no-password']">
-                  <svg class="status-icon" viewBox="0 0 24 24" fill="currentColor">
-                    <path v-if="user.password_set" d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-                    <path v-else d="M19,13H5V11H19V13Z"/>
-                  </svg>
-                  {{ user.password_set ? 'Yes' : 'No' }}
-                </span>
+                <div class="password-cell">
+                  <span :class="['password-status', user.password_set ? 'has-password' : 'no-password']">
+                    <svg class="status-icon" viewBox="0 0 24 24" fill="currentColor">
+                      <path v-if="user.password_set" d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+                      <path v-else d="M19,13H5V11H19V13Z"/>
+                    </svg>
+                    {{ user.password_set ? 'Yes' : 'No' }}
+                  </span>
+                  <div class="password-actions" v-if="user.password_set">
+                    <button
+                      @click.stop="rotateUserPassword(user.accountId, user.username)"
+                      class="btn btn-primary btn-xs password-rotate-btn"
+                      :disabled="actionLoading[`${user.accountId}-${user.username}-rotate-password`]"
+                      title="Rotate console password"
+                    >
+                      <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+                      </svg>
+                    </button>
+                    <button
+                      @click.stop="removeUserPassword(user.accountId, user.username)"
+                      class="btn btn-warning btn-xs password-remove-btn"
+                      :disabled="actionLoading[`${user.accountId}-${user.username}-password`]"
+                      title="Remove console password"
+                    >
+                      <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
               </td>
               <td>
                 <span class="key-count">{{ user.access_keys?.length || 0 }}</span>
@@ -465,6 +489,67 @@ export default {
       }
     },
 
+    async removeUserPassword(accountId, username) {
+      const confirmMessage = `Are you sure you want to remove the console password for user "${username}"?\n\nThis will:\n1. Delete the user's console login password\n2. Prevent the user from logging into the AWS Console\n3. Not affect programmatic access (access keys)\n\nThis action cannot be undone!`
+
+      if (!confirm(confirmMessage)) return
+
+      const loadingKey = `${accountId}-${username}-password`
+      this.actionLoading[loadingKey] = true
+
+      try {
+        await axios.delete(`/api/accounts/${accountId}/users/${username}/password`)
+
+        // Explicitly invalidate cache to ensure fresh data
+        try {
+          await axios.post(`/api/cache/accounts/${accountId}/invalidate`)
+        } catch (cacheErr) {
+          console.warn('Failed to invalidate account cache:', cacheErr)
+        }
+
+        alert(`Console password for user "${username}" has been successfully removed.`)
+        // Refresh the data to update the list
+        await this.refreshData()
+      } catch (error) {
+        console.error('Failed to remove user password:', error)
+        alert(error.response?.data?.error || 'Failed to remove user password. Please try again.')
+      } finally {
+        delete this.actionLoading[loadingKey]
+      }
+    },
+
+    async rotateUserPassword(accountId, username) {
+      const confirmMessage = `Are you sure you want to rotate the console password for user "${username}"?\n\nThis will:\n1. Generate a new random console password\n2. ${this.allUsers.find(u => u.accountId === accountId && u.username === username)?.password_set ? 'Replace the existing password' : 'Create a new password'}\n3. Display the new password once (save it immediately)\n\nContinue?`
+
+      if (!confirm(confirmMessage)) return
+
+      const loadingKey = `${accountId}-${username}-rotate-password`
+      this.actionLoading[loadingKey] = true
+
+      try {
+        const response = await axios.post(`/api/accounts/${accountId}/users/${username}/password/rotate`)
+
+        // Explicitly invalidate cache to ensure fresh data
+        try {
+          await axios.post(`/api/cache/accounts/${accountId}/invalidate`)
+        } catch (cacheErr) {
+          console.warn('Failed to invalidate account cache:', cacheErr)
+        }
+
+        // Show the new password in an alert
+        const newPassword = response.data.new_password
+        alert(`New password for user "${username}":\n\n${newPassword}\n\nSave this password now! This is the only time it will be displayed.`)
+
+        // Refresh the data to update the list
+        await this.refreshData()
+      } catch (error) {
+        console.error('Failed to rotate user password:', error)
+        alert(error.response?.data?.error || 'Failed to rotate user password. Please try again.')
+      } finally {
+        delete this.actionLoading[loadingKey]
+      }
+    },
+
     downloadUsersJSON() {
       try {
         const exportData = {
@@ -782,6 +867,29 @@ export default {
   color: #dc2626;
 }
 
+.password-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  justify-content: space-between;
+}
+
+.password-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.user-row:hover .password-actions {
+  opacity: 1;
+}
+
+.password-rotate-btn,
+.password-remove-btn {
+  transition: all 0.2s ease;
+}
+
 .status-icon {
   width: 0.875rem;
   height: 0.875rem;
@@ -874,6 +982,23 @@ export default {
   padding: 0.5rem 0.75rem;
   font-size: 0.75rem;
   gap: 0.375rem;
+}
+
+.btn-xs {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.625rem;
+  gap: 0.25rem;
+}
+
+.btn-warning {
+  background: #f59e0b;
+  color: white;
+  border: 1px solid #d97706;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #d97706;
+  border-color: #b45309;
 }
 
 .btn-icon {
