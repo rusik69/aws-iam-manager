@@ -10,6 +10,7 @@
         <nav>
           <router-link to="/" class="nav-link">Users</router-link>
           <router-link to="/public-ips" class="nav-link">Public IPs</router-link>
+          <router-link to="/security-groups" class="nav-link">Security Groups</router-link>
           <button @click="toggleTheme" class="theme-btn">
             {{ isDarkTheme ? '☀️' : '🌙' }}
           </button>
@@ -153,8 +154,7 @@ header {
 }
 
 .container {
-  max-width: 1200px;
-  margin: 0 auto;
+  width: 100%;
   padding: 1rem 2rem;
   display: flex;
   justify-content: space-between;
@@ -227,8 +227,6 @@ nav {
 main {
   flex: 1;
   padding: var(--spacing-xl);
-  max-width: 1400px;
-  margin: 0 auto;
   width: 100%;
   background: var(--color-bg-secondary);
   min-height: calc(100vh - 4rem);

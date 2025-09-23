@@ -35,9 +35,23 @@ func (s *Server) SetupRoutes() *gin.Engine {
 	r := gin.Default()
 	r.Use(cors.Default())
 
+	// Health check endpoints
+	r.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+	})
+	r.GET("/ready", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	})
+
 	// API routes
 	api := r.Group("/api")
 	{
+		// Authentication routes
+		api.GET("/auth/user", s.handler.GetCurrentUser)
+
 		// Account and user management routes
 		api.GET("/accounts", s.handler.ListAccounts)
 		api.GET("/accounts/:accountId/users", s.handler.ListUsers)
@@ -49,14 +63,22 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.DELETE("/accounts/:accountId/users/:username/keys/:keyId", s.handler.DeleteAccessKey)
 		api.PUT("/accounts/:accountId/users/:username/keys/:keyId/rotate", s.handler.RotateAccessKey)
 		
-		// Public IP management routes
+		// IP management routes
 		api.GET("/public-ips", s.handler.ListPublicIPs)
-		
+
+		// Security groups routes
+		api.GET("/security-groups", s.handler.ListSecurityGroups)
+		api.GET("/accounts/:accountId/security-groups", s.handler.ListSecurityGroupsByAccount)
+		api.GET("/accounts/:accountId/regions/:region/security-groups/:groupId", s.handler.GetSecurityGroup)
+		api.DELETE("/accounts/:accountId/regions/:region/security-groups/:groupId", s.handler.DeleteSecurityGroup)
+
 		// Cache management routes
 		api.POST("/cache/clear", s.handler.ClearCache)
 		api.POST("/cache/accounts/:accountId/invalidate", s.handler.InvalidateAccountCache)
 		api.POST("/cache/accounts/:accountId/users/:username/invalidate", s.handler.InvalidateUserCache)
 		api.POST("/cache/public-ips/invalidate", s.handler.InvalidatePublicIPsCache)
+		api.POST("/cache/security-groups/invalidate", s.handler.InvalidateSecurityGroupsCache)
+		api.POST("/cache/accounts/:accountId/security-groups/invalidate", s.handler.InvalidateAccountSecurityGroupsCache)
 	}
 
 	// Serve frontend

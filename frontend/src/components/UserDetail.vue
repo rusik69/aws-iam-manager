@@ -164,8 +164,24 @@
             <h4>No Access Keys</h4>
             <p>This user doesn't have any access keys yet. Create one to enable programmatic access.</p>
           </div>
-          <div v-else class="keys-list">
-            <div v-for="key in (user.access_keys || [])" :key="key.access_key_id" class="key-item">
+          <div v-else>
+            <div class="keys-controls">
+              <div class="search-section">
+                <div class="search-box">
+                  <svg class="search-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"/>
+                  </svg>
+                  <input
+                    v-model="keySearchQuery"
+                    type="text"
+                    placeholder="Search access keys..."
+                    class="search-input"
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="keys-list">
+              <div v-for="key in filteredAccessKeys" :key="key.access_key_id" class="key-item">
               <div class="key-header">
                 <div class="key-info">
                   <div class="key-id">
@@ -179,9 +195,31 @@
                       <svg class="status-dot" viewBox="0 0 24 24" fill="currentColor">
                         <circle cx="12" cy="12" r="4"/>
                       </svg>
-                      {{ key.status }}
+                      {{ key.status === 'Active' ? 'Active ' : key.status }}
                     </span>
-                    <span class="key-date">Created {{ formatRelativeDate(key.create_date) }}</span>
+                    <div class="key-times">
+                      <div class="key-date">
+                        <span class="date-label">Created:</span>
+                        <div class="date-display">
+                          <span class="date-value">{{ formatDate(key.create_date) }}</span>
+                          <span class="date-relative">{{ formatRelativeDate(key.create_date) }}</span>
+                        </div>
+                      </div>
+                      <div v-if="key.last_used_date" class="key-last-used">
+                        <span class="date-label">Last used:</span>
+                        <div class="date-display">
+                          <span class="date-value">{{ formatDate(key.last_used_date) }}</span>
+                          <span class="date-relative">{{ formatRelativeDate(key.last_used_date) }}</span>
+                        </div>
+                        <div v-if="key.last_used_service" class="last-used-service">
+                          {{ key.last_used_service }}{{ key.last_used_region ? ' in ' + key.last_used_region : '' }}
+                        </div>
+                      </div>
+                      <div v-else-if="key.status === 'Active'" class="key-never-used">
+                        <span class="date-label">Last used:</span>
+                        <span class="never-used-text">Never used</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div class="key-actions">
@@ -200,6 +238,7 @@
                 </div>
               </div>
             </div>
+          </div>
           </div>
         </div>
       </div>
@@ -284,7 +323,28 @@ export default {
       newKey: null,
       deletingUser: false,
       removingPassword: false,
-      rotatingPassword: false
+      rotatingPassword: false,
+      keySearchQuery: ''
+    }
+  },
+  computed: {
+    filteredAccessKeys() {
+      if (!this.user || !this.user.access_keys) return []
+
+      let keys = [...this.user.access_keys]
+
+      // Apply search filter
+      if (this.keySearchQuery) {
+        const query = this.keySearchQuery.toLowerCase()
+        keys = keys.filter(key =>
+          key.access_key_id.toLowerCase().includes(query) ||
+          key.status.toLowerCase().includes(query) ||
+          (key.last_used_service && key.last_used_service.toLowerCase().includes(query)) ||
+          (key.last_used_region && key.last_used_region.toLowerCase().includes(query))
+        )
+      }
+
+      return keys
     }
   },
   async mounted() {
@@ -474,7 +534,10 @@ export default {
           access_keys: this.user.access_keys.map(key => ({
             access_key_id: key.access_key_id,
             status: key.status,
-            create_date: key.create_date
+            create_date: key.create_date,
+            last_used_date: key.last_used_date,
+            last_used_service: key.last_used_service,
+            last_used_region: key.last_used_region
           })),
           total_keys: this.user.access_keys.length
         }
@@ -611,7 +674,7 @@ export default {
   padding: var(--spacing-lg);
   background: var(--color-bg-primary);
   border-radius: var(--radius-lg);
-  box-shadow: 0 2px 8px var(--color-shadow-light);
+  box-shadow: var(--shadow);
 }
 
 .account-subtitle {
@@ -717,10 +780,10 @@ export default {
 .info-card, .keys-card {
   background: var(--color-bg-primary);
   border-radius: var(--radius-lg);
-  box-shadow: 0 4px 12px var(--color-shadow-light);
+  box-shadow: var(--shadow-md);
   border: 1px solid var(--color-border-light);
   overflow: hidden;
-  transition: all var(--transition-normal);
+  transition: all var(--transition);
 }
 
 .info-card:hover, .keys-card:hover {
@@ -977,7 +1040,7 @@ export default {
 .key-item {
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md);
-  transition: all var(--transition-normal);
+  transition: all var(--transition);
   margin-bottom: var(--spacing-xs);
 }
 
@@ -1053,6 +1116,117 @@ export default {
   font-size: 0.75rem;
   color: var(--color-text-secondary);
 }
+
+.key-times {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.key-date,
+.key-last-used {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.date-label {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.date-display {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.date-value {
+  font-size: 0.75rem;
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.date-relative {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+}
+
+.key-never-used {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.never-used-text {
+  font-size: 0.75rem;
+  color: var(--color-warning);
+  font-style: italic;
+  font-weight: 500;
+}
+
+.last-used-service {
+  color: var(--color-text-tertiary);
+  font-size: 0.7rem;
+  margin-top: 0.25rem;
+}
+
+.keys-controls {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: var(--color-bg-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+}
+
+.search-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  max-width: 400px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.75rem;
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+  transition: all var(--transition-fast);
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--color-btn-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.search-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
 
 .key-actions {
   display: flex;

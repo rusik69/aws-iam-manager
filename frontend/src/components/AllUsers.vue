@@ -58,10 +58,10 @@
           <svg class="search-icon" viewBox="0 0 24 24" fill="currentColor">
             <path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"/>
           </svg>
-          <input 
-            v-model="userSearchQuery" 
-            type="text" 
-            placeholder="Search users..."
+          <input
+            v-model="userSearchQuery"
+            type="text"
+            placeholder="Search users, accounts, or access key IDs..."
             class="search-input"
           />
         </div>
@@ -98,12 +98,33 @@
         <table class="users-table">
           <thead>
             <tr>
-              <th>User</th>
-              <th>Account</th>
+              <th @click="sortBy('username')" class="sortable">
+                User
+                <span v-if="sortField === 'username'" class="sort-indicator">
+                  {{ sortDirection === 'asc' ? '↑' : '↓' }}
+                </span>
+              </th>
+              <th @click="sortBy('accountName')" class="sortable">
+                Account
+                <span v-if="sortField === 'accountName'" class="sort-indicator">
+                  {{ sortDirection === 'asc' ? '↑' : '↓' }}
+                </span>
+              </th>
               <th>Password</th>
               <th>Keys</th>
               <th>Old Keys</th>
-              <th>Created</th>
+              <th @click="sortBy('last_used')" class="sortable">
+                Last Key Use
+                <span v-if="sortField === 'last_used'" class="sort-indicator">
+                  {{ sortDirection === 'asc' ? '↑' : '↓' }}
+                </span>
+              </th>
+              <th @click="sortBy('create_date')" class="sortable">
+                Created
+                <span v-if="sortField === 'create_date'" class="sort-indicator">
+                  {{ sortDirection === 'asc' ? '↑' : '↓' }}
+                </span>
+              </th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -163,6 +184,20 @@
                 </span>
               </td>
               <td>
+                <div class="last-use-info">
+                  <div v-if="getMostRecentKeyUse(user)" class="last-use-data">
+                    <div class="date-value">{{ formatDate(getMostRecentKeyUse(user)) }}</div>
+                    <div class="date-relative">{{ formatRelativeDate(getMostRecentKeyUse(user)) }}</div>
+                  </div>
+                  <div v-else-if="hasActiveKeys(user)" class="never-used">
+                    <span class="never-used-text">Never used</span>
+                  </div>
+                  <div v-else class="no-keys">
+                    <span class="no-keys-text">No keys</span>
+                  </div>
+                </div>
+              </td>
+              <td>
                 <div class="date-info">
                   <div class="date-value">{{ formatDate(user.create_date) }}</div>
                   <div class="date-relative">{{ formatRelativeDate(user.create_date) }}</div>
@@ -213,7 +248,9 @@ export default {
       error: null,
       userSearchQuery: '',
       userFilter: 'all',
-      actionLoading: {}
+      actionLoading: {},
+      sortField: 'username',
+      sortDirection: 'asc'
     }
   },
   computed: {
@@ -249,11 +286,14 @@ export default {
       // Apply search filter
       if (this.userSearchQuery) {
         const query = this.userSearchQuery.toLowerCase()
-        users = users.filter(user => 
+        users = users.filter(user =>
           user.username.toLowerCase().includes(query) ||
           user.user_id.toLowerCase().includes(query) ||
           user.accountName.toLowerCase().includes(query) ||
-          user.accountId.toLowerCase().includes(query)
+          user.accountId.toLowerCase().includes(query) ||
+          (user.access_keys && user.access_keys.some(key =>
+            key.access_key_id.toLowerCase().includes(query)
+          ))
         )
       }
 
@@ -263,19 +303,56 @@ export default {
 
       switch (this.userFilter) {
         case 'withKeys':
-          return users.filter(user => (user.access_keys?.length || 0) > 0)
+          users = users.filter(user => (user.access_keys?.length || 0) > 0)
+          break
         case 'oldKeys':
-          return users.filter(user => 
+          users = users.filter(user =>
             user.access_keys?.some(key => {
               const keyDate = new Date(key.create_date)
               return keyDate < thirtyDaysAgo
             })
           )
+          break
         case 'withPasswords':
-          return users.filter(user => user.password_set)
+          users = users.filter(user => user.password_set)
+          break
         default:
-          return users
+          // users remains as enrichedUsers
       }
+
+      // Apply sorting
+      users.sort((a, b) => {
+        let aVal, bVal
+
+        switch (this.sortField) {
+          case 'username':
+            aVal = a.username.toLowerCase()
+            bVal = b.username.toLowerCase()
+            break
+          case 'accountName':
+            aVal = a.accountName.toLowerCase()
+            bVal = b.accountName.toLowerCase()
+            break
+          case 'create_date':
+            aVal = new Date(a.create_date)
+            bVal = new Date(b.create_date)
+            break
+          case 'last_used':
+            aVal = this.getMostRecentKeyUse(a) ? new Date(this.getMostRecentKeyUse(a)) : new Date(0)
+            bVal = this.getMostRecentKeyUse(b) ? new Date(this.getMostRecentKeyUse(b)) : new Date(0)
+            break
+          default:
+            return 0
+        }
+
+        if (this.sortDirection === 'asc') {
+          return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0)
+        } else {
+          return aVal > bVal ? -1 : (aVal < bVal ? 1 : 0)
+        }
+      })
+
+      return users
     }
   },
   async mounted() {
@@ -429,16 +506,57 @@ export default {
     
     getOldKeyCount(user) {
       if (!user.access_keys || user.access_keys.length === 0) return 0
-      
+
       const thirtyDaysAgo = new Date()
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-      
+
       return user.access_keys.filter(key => {
+        // Consider a key old if it was created more than 30 days ago AND either:
+        // 1. It has never been used, OR
+        // 2. It was last used more than 30 days ago
         const keyDate = new Date(key.create_date)
-        return keyDate < thirtyDaysAgo
+        const isOldByCreate = keyDate < thirtyDaysAgo
+
+        if (!isOldByCreate) return false
+
+        // If key has never been used, consider it old if created > 30 days ago
+        if (!key.last_used_date) return true
+
+        // If key has been used, check if last use was > 30 days ago
+        const lastUsedDate = new Date(key.last_used_date)
+        return lastUsedDate < thirtyDaysAgo
       }).length
     },
-    
+
+    getMostRecentKeyUse(user) {
+      if (!user.access_keys || user.access_keys.length === 0) return null
+
+      let mostRecent = null
+      for (const key of user.access_keys) {
+        if (key.last_used_date) {
+          const lastUsed = new Date(key.last_used_date)
+          if (!mostRecent || lastUsed > mostRecent) {
+            mostRecent = lastUsed
+          }
+        }
+      }
+      return mostRecent
+    },
+
+    hasActiveKeys(user) {
+      return user.access_keys && user.access_keys.length > 0 &&
+             user.access_keys.some(key => key.status === 'Active')
+    },
+
+    sortBy(field) {
+      if (this.sortField === field) {
+        this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc'
+      } else {
+        this.sortField = field
+        this.sortDirection = field === 'create_date' || field === 'last_used' ? 'desc' : 'asc'
+      }
+    },
+
     formatDate(dateString) {
       return new Date(dateString).toLocaleDateString('en-US', {
         year: 'numeric',
@@ -586,7 +704,7 @@ export default {
 /* Container */
 .all-users-container {
   min-height: 100vh;
-  background: var(--color-bg-primary, #ffffff);
+  background: var(--color-bg-secondary);
   padding: 1.5rem;
 }
 
@@ -594,9 +712,9 @@ export default {
 .page-header {
   margin-bottom: 2rem;
   padding: 1.5rem;
-  background: var(--color-bg-secondary, #f9fafb);
+  background: var(--color-bg-primary);
   border-radius: 0.75rem;
-  border: 1px solid var(--color-border-light, #e5e7eb);
+  border: 1px solid var(--color-border);
 }
 
 .header-content {
@@ -632,13 +750,13 @@ export default {
 .title-content h1 {
   font-size: 2rem;
   font-weight: 700;
-  color: var(--color-text-primary, #1f2937);
+  color: var(--color-text-primary);
   margin: 0 0 0.5rem 0;
 }
 
 .title-content p {
   font-size: 1rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary);
   margin: 0;
 }
 
@@ -663,8 +781,8 @@ export default {
 .loading-spinner {
   width: 3rem;
   height: 3rem;
-  border: 3px solid var(--color-border-light, #e5e7eb);
-  border-top: 3px solid #3b82f6;
+  border: 3px solid var(--color-border);
+  border-top: 3px solid var(--color-btn-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 1rem;
@@ -695,12 +813,12 @@ export default {
 .error-container h3 {
   font-size: 1.25rem;
   font-weight: 600;
-  color: var(--color-text-primary, #1f2937);
+  color: var(--color-text-primary);
   margin-bottom: 0.5rem;
 }
 
 .error-container p {
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary);
   margin-bottom: 1.5rem;
 }
 
@@ -714,9 +832,9 @@ export default {
 /* User Filters */
 .user-filters {
   padding: 1.5rem;
-  background: var(--color-bg-secondary, #f9fafb);
+  background: var(--color-bg-primary);
   border-radius: 0.75rem;
-  border: 1px solid var(--color-border-light, #e5e7eb);
+  border: 1px solid var(--color-border);
 }
 
 .search-box {
@@ -731,24 +849,24 @@ export default {
   transform: translateY(-50%);
   width: 1rem;
   height: 1rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary);
   pointer-events: none;
 }
 
 .search-input {
   width: 100%;
   padding: 0.75rem 0.75rem 0.75rem 2.5rem;
-  border: 1px solid var(--color-border-light, #e5e7eb);
+  border: 1px solid var(--color-border);
   border-radius: 0.5rem;
   font-size: 0.875rem;
-  background: var(--color-bg-primary, #ffffff);
-  color: var(--color-text-primary, #1f2937);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .search-input:focus {
   outline: none;
-  border-color: #3b82f6;
+  border-color: var(--color-btn-primary);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
@@ -760,12 +878,12 @@ export default {
 
 .filter-btn {
   padding: 0.5rem 1rem;
-  border: 1px solid var(--color-border-light, #e5e7eb);
+  border: 1px solid var(--color-border);
   border-radius: 0.5rem;
   font-size: 0.75rem;
   font-weight: 500;
-  background: var(--color-bg-primary, #ffffff);
-  color: var(--color-text-secondary, #6b7280);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: all 0.2s ease;
   text-transform: uppercase;
@@ -773,20 +891,20 @@ export default {
 }
 
 .filter-btn:hover {
-  background: var(--color-bg-tertiary, #f3f4f6);
+  background: var(--color-bg-tertiary);
 }
 
 .filter-btn.active {
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  background: var(--color-btn-primary);
   color: white;
   border-color: transparent;
 }
 
 /* Users Table */
 .users-table-container {
-  background: var(--color-bg-primary, #ffffff);
+  background: var(--color-bg-primary);
   border-radius: 0.75rem;
-  border: 1px solid var(--color-border-light, #e5e7eb);
+  border: 1px solid var(--color-border);
   overflow: hidden;
 }
 
@@ -797,12 +915,12 @@ export default {
 }
 
 .users-table th {
-  background: var(--color-bg-secondary, #f9fafb);
-  color: var(--color-text-secondary, #6b7280);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
   font-weight: 600;
   text-align: left;
   padding: 1rem 0.75rem;
-  border-bottom: 1px solid var(--color-border-light, #e5e7eb);
+  border-bottom: 1px solid var(--color-border);
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -811,7 +929,7 @@ export default {
 
 .users-table td {
   padding: 1rem 0.75rem;
-  border-bottom: 1px solid var(--color-border-light, #e5e7eb);
+  border-bottom: 1px solid var(--color-border);
   vertical-align: top;
 }
 
@@ -821,9 +939,9 @@ export default {
 }
 
 .user-row.clickable:hover {
-  background: var(--color-bg-secondary, #f9fafb);
+  background: var(--color-bg-secondary);
   transform: translateY(-1px);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-md);
 }
 
 .user-info,
@@ -836,18 +954,18 @@ export default {
 .user-name,
 .account-name {
   font-weight: 500;
-  color: var(--color-text-primary, #1f2937);
+  color: var(--color-text-primary);
 }
 
 .user-id,
 .account-id {
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   font-size: 0.75rem;
-  color: var(--color-text-secondary, #6b7280);
-  background: var(--color-bg-secondary, #f9fafb);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
   padding: 0.125rem 0.375rem;
   border-radius: 0.25rem;
-  border: 1px solid var(--color-border-light, #e5e7eb);
+  border: 1px solid var(--color-border);
   width: fit-content;
 }
 
@@ -860,11 +978,11 @@ export default {
 }
 
 .password-status.has-password {
-  color: #059669;
+  color: var(--color-success);
 }
 
 .password-status.no-password {
-  color: #dc2626;
+  color: var(--color-danger);
 }
 
 .password-cell {
@@ -897,16 +1015,62 @@ export default {
 
 .key-count {
   font-weight: 600;
-  color: var(--color-text-primary, #1f2937);
+  color: var(--color-text-primary);
 }
 
 .old-key-count {
   font-weight: 600;
-  color: var(--color-text-primary, #1f2937);
+  color: var(--color-text-primary);
 }
 
 .old-key-count.warning {
-  color: #f59e0b;
+  color: var(--color-warning);
+}
+
+.last-use-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.last-use-data {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.never-used {
+  text-align: center;
+}
+
+.never-used-text {
+  color: var(--color-warning);
+  font-style: italic;
+  font-size: 0.8rem;
+}
+
+.no-keys {
+  text-align: center;
+}
+
+.no-keys-text {
+  color: var(--color-text-tertiary);
+  font-size: 0.8rem;
+}
+
+.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sortable:hover {
+  background: var(--color-bg-secondary);
+}
+
+.sort-indicator {
+  margin-left: 0.5rem;
+  color: var(--color-btn-primary);
+  font-weight: bold;
 }
 
 .date-info {
@@ -917,12 +1081,12 @@ export default {
 
 .date-value {
   font-weight: 500;
-  color: var(--color-text-primary, #1f2937);
+  color: var(--color-text-primary);
 }
 
 .date-relative {
   font-size: 0.75rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary);
 }
 
 /* Buttons */
@@ -947,35 +1111,35 @@ export default {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  background: var(--color-btn-primary);
   color: white;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  background: var(--color-btn-primary-hover);
   transform: translateY(-1px);
 }
 
 .btn-secondary {
-  background: var(--color-bg-secondary, #f9fafb);
-  color: var(--color-text-secondary, #6b7280);
-  border: 1px solid var(--color-border-light, #e5e7eb);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: var(--color-bg-tertiary, #f3f4f6);
-  color: var(--color-text-primary, #1f2937);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 .btn-success {
-  background: #10b981;
+  background: var(--color-btn-success);
   color: white;
-  border: 1px solid #059669;
+  border: 1px solid var(--color-btn-success);
 }
 
 .btn-success:hover:not(:disabled) {
-  background: #059669;
-  border-color: #047857;
+  background: var(--color-btn-success-hover);
+  border-color: var(--color-btn-success-hover);
 }
 
 .btn-sm {
@@ -991,14 +1155,25 @@ export default {
 }
 
 .btn-warning {
-  background: #f59e0b;
+  background: var(--color-btn-warning);
   color: white;
-  border: 1px solid #d97706;
+  border: 1px solid var(--color-btn-warning);
 }
 
 .btn-warning:hover:not(:disabled) {
-  background: #d97706;
-  border-color: #b45309;
+  background: var(--color-btn-warning-hover);
+  border-color: var(--color-btn-warning-hover);
+}
+
+.btn-danger {
+  background: var(--color-btn-danger);
+  color: white;
+  border: 1px solid var(--color-btn-danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--color-btn-danger-hover);
+  border-color: var(--color-btn-danger-hover);
 }
 
 .btn-icon {
@@ -1010,7 +1185,7 @@ export default {
 .empty-results {
   text-align: center;
   padding: 4rem 2rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary);
 }
 
 .empty-icon {
@@ -1020,9 +1195,9 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-bg-secondary, #f9fafb);
+  background: var(--color-bg-secondary);
   border-radius: 50%;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary);
 }
 
 .empty-icon svg {
@@ -1032,12 +1207,12 @@ export default {
 
 .empty-results h4 {
   font-size: 1.125rem;
-  color: var(--color-text-primary, #1f2937);
+  color: var(--color-text-primary);
   margin-bottom: 0.5rem;
 }
 
 .empty-results p {
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary);
 }
 
 /* Responsive Design */
@@ -1108,83 +1283,6 @@ export default {
   }
 }
 
-/* Dark mode support */
-.dark .all-users-container {
-  background: #0d1117;
-}
-
-.dark .page-header,
-.dark .user-filters,
-.dark .users-table-container {
-  background: #21262d;
-  border-color: #30363d;
-}
-
-.dark .search-input {
-  background: #21262d;
-  border-color: #30363d;
-  color: #ffffff;
-}
-
-.dark .filter-btn {
-  background: #21262d;
-  border-color: #30363d;
-  color: #ffffff;
-}
-
-.dark .filter-btn:hover {
-  background: #30363d;
-}
-
-.dark .users-table th {
-  background: #161b22;
-  border-color: #30363d;
-  color: #ffffff;
-}
-
-.dark .users-table td {
-  border-color: #30363d;
-}
-
-.dark .user-row.clickable:hover {
-  background: #161b22;
-  box-shadow: 0 4px 6px -1px rgba(255, 255, 255, 0.05), 0 2px 4px -1px rgba(255, 255, 255, 0.03);
-}
-
-.dark .user-id,
-.dark .account-id {
-  background: #161b22;
-  border-color: #30363d;
-  color: #ffffff;
-}
-
-.dark .btn-secondary {
-  background: #21262d;
-  color: #ffffff;
-  border-color: #30363d;
-}
-
-.dark .btn-secondary:hover:not(:disabled) {
-  background: #30363d;
-}
-
-.dark .btn-success {
-  background: #047857;
-  border-color: #065f46;
-}
-
-.dark .btn-success:hover:not(:disabled) {
-  background: #065f46;
-}
-
-.dark .empty-results,
-.dark .empty-icon {
-  background: #161b22;
-}
-
-.dark .error-container {
-  background: #0d1117;
-}
 
 .user-actions {
   display: flex;

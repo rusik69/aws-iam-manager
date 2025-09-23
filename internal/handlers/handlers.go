@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/rusik69/aws-iam-manager/internal/middleware"
 	"github.com/rusik69/aws-iam-manager/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -60,9 +61,26 @@ func (h *Handler) ListUsers(c *gin.Context) {
 
 // containsAccessDenied checks if an error message indicates access denied
 func containsAccessDenied(errMsg string) bool {
-	return 	strings.Contains(errMsg, "AccessDenied") || 
-			strings.Contains(errMsg, "assume role") || 
+	return 	strings.Contains(errMsg, "AccessDenied") ||
+			strings.Contains(errMsg, "assume role") ||
 			strings.Contains(errMsg, "not authorized")
+}
+
+func (h *Handler) GetCurrentUser(c *gin.Context) {
+	user, exists := middleware.GetCurrentUser(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "User not authenticated",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"email":     user.Email,
+		"username":  user.PreferredUsername,
+		"groups":    user.Groups,
+		"authenticated": true,
+	})
 }
 
 func (h *Handler) GetUser(c *gin.Context) {
@@ -214,3 +232,133 @@ func (h *Handler) InvalidatePublicIPsCache(c *gin.Context) {
 	h.awsService.InvalidatePublicIPsCache()
 	c.JSON(http.StatusOK, gin.H{"message": "Public IPs cache invalidated successfully"})
 }
+
+func (h *Handler) ListSecurityGroups(c *gin.Context) {
+	sgs, err := h.awsService.ListSecurityGroups()
+	if err != nil {
+		fmt.Printf("[ERROR] ListSecurityGroups failed: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": "Failed to list security groups. Check AWS credentials and permissions.",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, sgs)
+}
+
+func (h *Handler) ListSecurityGroupsByAccount(c *gin.Context) {
+	accountID := c.Param("accountId")
+
+	if accountID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID is required",
+		})
+		return
+	}
+
+	sgs, err := h.awsService.ListSecurityGroupsByAccount(accountID)
+	if err != nil {
+		fmt.Printf("[ERROR] ListSecurityGroupsByAccount failed for account %s: %v\n", accountID, err)
+
+		statusCode := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "cannot access account") {
+			statusCode = http.StatusForbidden
+		}
+
+		c.JSON(statusCode, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, sgs)
+}
+
+func (h *Handler) InvalidateSecurityGroupsCache(c *gin.Context) {
+	h.awsService.InvalidateSecurityGroupsCache()
+	c.JSON(http.StatusOK, gin.H{"message": "Security groups cache invalidated successfully"})
+}
+
+func (h *Handler) InvalidateAccountSecurityGroupsCache(c *gin.Context) {
+	accountID := c.Param("accountId")
+
+	if accountID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID is required",
+		})
+		return
+	}
+
+	h.awsService.InvalidateAccountSecurityGroupsCache(accountID)
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Security groups cache invalidated for account %s", accountID)})
+}
+
+func (h *Handler) GetSecurityGroup(c *gin.Context) {
+	accountID := c.Param("accountId")
+	region := c.Param("region")
+	groupID := c.Param("groupId")
+
+	if accountID == "" || region == "" || groupID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID, region, and group ID are required",
+		})
+		return
+	}
+
+	sg, err := h.awsService.GetSecurityGroup(accountID, region, groupID)
+	if err != nil {
+		fmt.Printf("[ERROR] GetSecurityGroup failed for group %s in account %s, region %s: %v\n", groupID, accountID, region, err)
+
+		statusCode := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			statusCode = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "cannot access account") {
+			statusCode = http.StatusForbidden
+		}
+
+		c.JSON(statusCode, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, sg)
+}
+
+func (h *Handler) DeleteSecurityGroup(c *gin.Context) {
+	accountID := c.Param("accountId")
+	region := c.Param("region")
+	groupID := c.Param("groupId")
+
+	if accountID == "" || region == "" || groupID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID, region, and group ID are required",
+		})
+		return
+	}
+
+	err := h.awsService.DeleteSecurityGroup(accountID, region, groupID)
+	if err != nil {
+		fmt.Printf("[ERROR] DeleteSecurityGroup failed for group %s in account %s, region %s: %v\n", groupID, accountID, region, err)
+
+		// Determine appropriate status code based on error
+		statusCode := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			statusCode = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "cannot delete default") ||
+			strings.Contains(err.Error(), "still in use") {
+			statusCode = http.StatusConflict
+		} else if strings.Contains(err.Error(), "cannot access account") {
+			statusCode = http.StatusForbidden
+		}
+
+		c.JSON(statusCode, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("Security group %s deleted successfully", groupID),
+	})
+}
+

@@ -68,6 +68,7 @@
           <option value="application">Application Load Balancer</option>
           <option value="network">Network Load Balancer</option>
           <option value="gateway">Gateway Load Balancer</option>
+          <option value="CLB">Classic Load Balancer</option>
           <option value="NAT">NAT Gateway</option>
         </select>
         <select v-model="filterRegion" class="filter-select">
@@ -108,7 +109,7 @@
               </th>
               <th>Resource Name</th>
               <th>Resource ID</th>
-              <th @click="sortBy('state')" class="sortable">
+              <th @click="sortBy('state')" class="sortable state-column">
                 State
                 <span v-if="sortField === 'state'" class="sort-indicator">
                   {{ sortDirection === 'asc' ? '↑' : '↓' }}
@@ -139,7 +140,7 @@
               <td class="resource-id">
                 <code>{{ ip.resource_id }}</code>
               </td>
-              <td class="state">
+              <td class="state state-column">
                 <span :class="`state-badge state-${ip.state?.toLowerCase()}`">
                   {{ ip.state || '-' }}
                 </span>
@@ -334,19 +335,18 @@ export default {
 
 <style scoped>
 .public-ips {
-  max-width: 1400px;
-  margin: 0 auto;
+  width: 100%;
   padding: 2rem;
 }
 
 h1 {
-  color: #1a202c;
+  color: var(--color-text-primary);
   margin-bottom: 0.5rem;
   font-size: 2rem;
 }
 
 .description {
-  color: #718096;
+  color: var(--color-text-secondary);
   margin-bottom: 2rem;
   font-size: 1.1rem;
 }
@@ -363,8 +363,8 @@ h1 {
 .spinner {
   width: 40px;
   height: 40px;
-  border: 4px solid #e2e8f0;
-  border-left-color: #3182ce;
+  border: 4px solid var(--color-border);
+  border-left-color: var(--color-btn-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 1rem;
@@ -377,35 +377,36 @@ h1 {
 }
 
 .error {
-  background: #fed7d7;
-  border: 1px solid #fc8181;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 8px;
   padding: 1.5rem;
   text-align: center;
 }
 
 .error h3 {
-  color: #c53030;
+  color: var(--color-danger);
   margin-bottom: 0.5rem;
 }
 
 .error p {
-  color: #822727;
+  color: var(--color-danger);
   margin-bottom: 1rem;
 }
 
 .retry-btn {
-  background: #3182ce;
+  background: var(--color-btn-primary);
   color: white;
   border: none;
   padding: 0.5rem 1rem;
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.9rem;
+  transition: all var(--transition-fast);
 }
 
 .retry-btn:hover {
-  background: #2c5282;
+  background: var(--color-btn-primary-hover);
 }
 
 .summary {
@@ -415,9 +416,9 @@ h1 {
   gap: 2rem;
   margin-bottom: 2rem;
   padding: 1rem;
-  background: #f7fafc;
+  background: var(--color-bg-secondary);
   border-radius: 8px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-border);
 }
 
 .summary-stats {
@@ -438,14 +439,14 @@ h1 {
 
 .summary-item .label {
   font-size: 0.9rem;
-  color: #718096;
+  color: var(--color-text-secondary);
   margin-bottom: 0.25rem;
 }
 
 .summary-item .value {
   font-size: 1.5rem;
   font-weight: bold;
-  color: #1a202c;
+  color: var(--color-text-primary);
 }
 
 .filters {
@@ -458,10 +459,20 @@ h1 {
 .search-input,
 .filter-select {
   padding: 0.5rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   font-size: 0.9rem;
   min-width: 200px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  transition: all var(--transition-fast);
+}
+
+.search-input:focus,
+.filter-select:focus {
+  outline: none;
+  border-color: var(--color-btn-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .search-input {
@@ -471,23 +482,23 @@ h1 {
 
 .table-container {
   overflow-x: auto;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
 }
 
 .ip-table {
   width: 100%;
   border-collapse: collapse;
-  background: white;
+  background: var(--color-bg-primary);
 }
 
 .ip-table th {
-  background: #f7fafc;
+  background: var(--color-bg-secondary);
   padding: 1rem;
   text-align: left;
   font-weight: 600;
-  color: #4a5568;
-  border-bottom: 2px solid #e2e8f0;
+  color: var(--color-text-primary);
+  border-bottom: 2px solid var(--color-border);
   white-space: nowrap;
 }
 
@@ -497,41 +508,48 @@ h1 {
 }
 
 .ip-table th.sortable:hover {
-  background: #edf2f7;
+  background: var(--color-bg-tertiary);
 }
 
 .sort-indicator {
   margin-left: 0.5rem;
-  color: #3182ce;
+  color: var(--color-btn-primary);
+}
+
+.state-column {
+  min-width: 120px;
+  width: 120px;
 }
 
 .ip-table td {
   padding: 1rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--color-border);
   vertical-align: top;
+  color: var(--color-text-primary);
 }
 
 .ip-row:hover {
-  background: #f7fafc;
+  background: var(--color-bg-secondary);
 }
 
 .ip-address code,
 .resource-id code {
-  background: #f1f5f9;
+  background: var(--color-bg-tertiary);
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   font-size: 0.85rem;
-  color: #334155;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
 }
 
 .account-info .account-name {
   font-weight: 500;
-  color: #1a202c;
+  color: var(--color-text-primary);
 }
 
 .account-info .account-id {
   font-size: 0.8rem;
-  color: #718096;
+  color: var(--color-text-secondary);
   margin-top: 0.25rem;
 }
 
@@ -561,6 +579,11 @@ h1 {
 .resource-gateway {
   background: #e0e7ff;
   color: #3730a3;
+}
+
+.resource-clb {
+  background: #fef3c7;
+  color: #92400e;
 }
 
 .resource-nat {
@@ -595,7 +618,7 @@ h1 {
 .no-results {
   text-align: center;
   padding: 2rem;
-  color: #718096;
+  color: var(--color-text-secondary);
 }
 
 /* Button Styles */
@@ -619,25 +642,25 @@ h1 {
 }
 
 .btn-secondary {
-  background: #f9fafb;
-  color: #6b7280;
-  border: 1px solid #e5e7eb;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #f3f4f6;
-  color: #1f2937;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 .btn-success {
-  background: #10b981;
+  background: var(--color-btn-success);
   color: white;
-  border: 1px solid #059669;
+  border: 1px solid var(--color-btn-success);
 }
 
 .btn-success:hover:not(:disabled) {
-  background: #059669;
-  border-color: #047857;
+  background: var(--color-btn-success-hover);
+  border-color: var(--color-btn-success-hover);
 }
 
 .btn-icon {

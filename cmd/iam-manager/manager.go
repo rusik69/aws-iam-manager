@@ -1145,29 +1145,45 @@ func (m *IAMManager) stackSetStatus(ctx context.Context) error {
 	fmt.Printf("Permission Model: %s\n", stackSet.PermissionModel)
 	fmt.Println()
 
-	// List stack instances
-	instancesResult, err := m.cfnClient.ListStackInstances(ctx, &cloudformation.ListStackInstancesInput{
-		StackSetName: aws.String(m.stackSetName),
-	})
+	// List stack instances with pagination
+	var allInstances []cfntypes.StackInstanceSummary
+	var nextToken *string
 
-	if err != nil {
-		return fmt.Errorf("failed to list stack instances: %w", err)
+	for {
+		input := &cloudformation.ListStackInstancesInput{
+			StackSetName: aws.String(m.stackSetName),
+		}
+		if nextToken != nil {
+			input.NextToken = nextToken
+		}
+
+		instancesResult, err := m.cfnClient.ListStackInstances(ctx, input)
+		if err != nil {
+			return fmt.Errorf("failed to list stack instances: %w", err)
+		}
+
+		allInstances = append(allInstances, instancesResult.Summaries...)
+
+		if instancesResult.NextToken == nil {
+			break
+		}
+		nextToken = instancesResult.NextToken
 	}
 
-	if len(instancesResult.Summaries) == 0 {
+	if len(allInstances) == 0 {
 		logWarning("No stack instances found")
 		logInfo("The StackSet exists but has not been deployed to any accounts")
 		return nil
 	}
 
-	fmt.Printf("%sStack Instances (%d total):%s\n", colorCyan, len(instancesResult.Summaries), colorReset)
+	fmt.Printf("%sStack Instances (%d total):%s\n", colorCyan, len(allInstances), colorReset)
 	fmt.Println()
 
 	successCount := 0
 	failureCount := 0
 	otherCount := 0
 
-	for _, instance := range instancesResult.Summaries {
+	for _, instance := range allInstances {
 		account := *instance.Account
 		region := *instance.Region
 		status := instance.Status
@@ -1250,19 +1266,16 @@ func (m *IAMManager) deleteStackSet(ctx context.Context) error {
 	logInfo(fmt.Sprintf("Found StackSet: %s", *stackSet.StackSetName))
 	fmt.Println()
 
-	// List stack instances
-	instancesResult, err := m.cfnClient.ListStackInstances(ctx, &cloudformation.ListStackInstancesInput{
-		StackSetName: aws.String(m.stackSetName),
-	})
-
+	// List stack instances with pagination
+	allInstances, err := m.listAllStackInstances(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list stack instances: %w", err)
 	}
 
 	logWarning("This will permanently delete:")
 	fmt.Printf("  - StackSet: %s\n", m.stackSetName)
-	if len(instancesResult.Summaries) > 0 {
-		fmt.Printf("  - All %d stack instances across organization accounts\n", len(instancesResult.Summaries))
+	if len(allInstances) > 0 {
+		fmt.Printf("  - All %d stack instances across organization accounts\n", len(allInstances))
 		fmt.Printf("  - IAM Manager role '%s' from ALL organization accounts\n", m.orgRoleName)
 		fmt.Println("  - All managed and inline policies attached to these roles")
 		fmt.Println("  - All CloudFormation stacks created by the StackSet")
@@ -1278,16 +1291,16 @@ func (m *IAMManager) deleteStackSet(ctx context.Context) error {
 	}
 
 	// First, manually remove IAM roles from all accounts before deleting stack instances
-	if len(instancesResult.Summaries) > 0 {
+	if len(allInstances) > 0 {
 		logInfo("Removing IAM roles from all accounts...")
-		if err := m.removeIAMRolesFromAccounts(ctx, instancesResult.Summaries); err != nil {
+		if err := m.removeIAMRolesFromAccounts(ctx, allInstances); err != nil {
 			logWarning(fmt.Sprintf("Failed to remove IAM roles from some accounts: %v", err))
 			logInfo("Continuing with StackSet deletion...")
 		}
 	}
 
 	// Delete all stack instances
-	if len(instancesResult.Summaries) > 0 {
+	if len(allInstances) > 0 {
 		logInfo("Deleting all stack instances...")
 		logInfo("Deletion Configuration:")
 		logInfo("  • Parallel deletion from ALL accounts simultaneously (100% concurrency)")
@@ -1682,18 +1695,16 @@ func (m *IAMManager) showStatus(ctx context.Context) error {
 		fmt.Printf("  Permission Model: %s\n", stackSet.PermissionModel)
 
 		// Check stack instances
-		instancesResult, err := m.cfnClient.ListStackInstances(ctx, &cloudformation.ListStackInstancesInput{
-			StackSetName: aws.String(m.stackSetName),
-		})
+		allStackInstances, err := m.listAllStackInstances(ctx)
 
 		if err == nil {
-			totalInstances := len(instancesResult.Summaries)
+			totalInstances := len(allStackInstances)
 			if totalInstances > 0 {
 				successCount := 0
 				failureCount := 0
 				otherCount := 0
 
-				for _, instance := range instancesResult.Summaries {
+				for _, instance := range allStackInstances {
 					switch instance.Status {
 					case cfntypes.StackInstanceStatusCurrent:
 						successCount++
@@ -1733,16 +1744,38 @@ func (m *IAMManager) showStatus(ctx context.Context) error {
 		fmt.Printf("  Organization ID: %s\n", *org.Organization.Id)
 		fmt.Printf("  Master Account: %s\n", *org.Organization.MasterAccountId)
 
-		// List organization accounts
-		accountsResult, err := m.orgsClient.ListAccounts(ctx, &organizations.ListAccountsInput{})
-		if err == nil {
-			activeAccounts := 0
+		// List organization accounts with pagination
+		activeAccounts := 0
+		totalAccounts := 0
+		var nextToken *string
+
+		for {
+			input := &organizations.ListAccountsInput{}
+			if nextToken != nil {
+				input.NextToken = nextToken
+			}
+
+			accountsResult, err := m.orgsClient.ListAccounts(ctx, input)
+			if err != nil {
+				logWarning(fmt.Sprintf("Unable to list organization accounts: %v", err))
+				break
+			}
+
 			for _, account := range accountsResult.Accounts {
+				totalAccounts++
 				if account.Status == orgtypes.AccountStatusActive {
 					activeAccounts++
 				}
 			}
-			logSuccess(fmt.Sprintf("Organization has %d active accounts", activeAccounts))
+
+			if accountsResult.NextToken == nil {
+				break
+			}
+			nextToken = accountsResult.NextToken
+		}
+
+		if totalAccounts > 0 {
+			logSuccess(fmt.Sprintf("Organization has %d total accounts (%d active)", totalAccounts, activeAccounts))
 		}
 	}
 	fmt.Println()
@@ -1802,4 +1835,33 @@ func (m *IAMManager) printStatusSummary() {
 	fmt.Println("  3. Copy credentials to .env file and start the web application")
 	fmt.Println("  4. Use 'status' command regularly to monitor deployment health")
 	fmt.Println("=======================================================================")
+}
+
+// listAllStackInstances returns all stack instances with pagination
+func (m *IAMManager) listAllStackInstances(ctx context.Context) ([]cfntypes.StackInstanceSummary, error) {
+	var allInstances []cfntypes.StackInstanceSummary
+	var nextToken *string
+
+	for {
+		input := &cloudformation.ListStackInstancesInput{
+			StackSetName: aws.String(m.stackSetName),
+		}
+		if nextToken != nil {
+			input.NextToken = nextToken
+		}
+
+		result, err := m.cfnClient.ListStackInstances(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list stack instances: %w", err)
+		}
+
+		allInstances = append(allInstances, result.Summaries...)
+
+		if result.NextToken == nil {
+			break
+		}
+		nextToken = result.NextToken
+	}
+
+	return allInstances, nil
 }

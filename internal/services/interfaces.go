@@ -13,9 +13,15 @@ type AWSServiceInterface interface {
 	DeleteUserPassword(accountID, username string) error
 	RotateUserPassword(accountID, username string) (map[string]any, error)
 	ListPublicIPs() ([]models.PublicIP, error)
+	ListSecurityGroups() ([]models.SecurityGroup, error)
+	ListSecurityGroupsByAccount(accountID string) ([]models.SecurityGroup, error)
+	GetSecurityGroup(accountID, region, groupID string) (*models.SecurityGroup, error)
+	DeleteSecurityGroup(accountID, region, groupID string) error
 	// Cache management methods
 	ClearCache()
 	InvalidateAccountCache(accountID string)
 	InvalidateUserCache(accountID, username string)
 	InvalidatePublicIPsCache()
+	InvalidateSecurityGroupsCache()
+	InvalidateAccountSecurityGroupsCache(accountID string)
 }

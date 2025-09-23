@@ -139,3 +139,5 @@ temp/
 *.sw?
 
 aws-iam-manager
+server
+iam-manager

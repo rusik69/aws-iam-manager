@@ -23,7 +23,7 @@ A comprehensive web application for managing IAM users across multiple AWS accou
 - **Backend**: Go 1.21+ with Gin framework and AWS SDK v2
 - **Frontend**: Vue.js 3 with Vite, compiled and served by Go (no Node.js runtime dependency)
 - **Deployment**: Docker Compose for easy deployment
-- **Authentication**: Uses AWS IAM roles for cross-account access
+- **Authentication**: AWS IAM roles for cross-account access
 - **Security**: External ID validation and proper credential management
 
 ## 📋 Prerequisites
@@ -85,7 +85,10 @@ cd aws-iam-manager
 cp .env.example .env
 # Edit .env with your AWS credentials
 
-# 3. Build and run
+# 3. (Optional) Setup OAuth2 Proxy for SSO
+./scripts/setup-oauth2.sh
+
+# 4. Build and run
 docker-compose up --build
 ```
 
@@ -110,6 +113,7 @@ STACK_SET_NAME=IAMManagerRoleStackSet
 # Application settings
 PORT=8080
 ```
+
 
 ## 🛠️ Makefile Targets
 
@@ -239,6 +243,12 @@ make delete-stackset
 - `POST /api/accounts/:accountId/users/:username/keys` - Create access key
 - `DELETE /api/accounts/:accountId/users/:username/keys/:keyId` - Delete access key
 - `PUT /api/accounts/:accountId/users/:username/keys/:keyId/rotate` - Rotate access key
+
+### Security Groups Management
+- `GET /api/security-groups` - List security groups across all accounts
+- `GET /api/accounts/:accountId/security-groups` - List security groups by account
+- `GET /api/accounts/:accountId/regions/:region/security-groups/:groupId` - Get security group details
+- `DELETE /api/accounts/:accountId/regions/:region/security-groups/:groupId` - Delete security group
 
 ### StackSet Management
 - `GET /api/stackset/status` - Get StackSet deployment status

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,6 +25,7 @@ func (m *MockAWSService) ListAccounts() ([]models.Account, error) {
 }
 
 func (m *MockAWSService) ListUsers(accountID string) ([]models.User, error) {
+	lastUsedDate := time.Now().Add(-48 * time.Hour) // 2 days ago
 	return []models.User{
 		{
 			Username:    "testuser1",
@@ -33,9 +35,12 @@ func (m *MockAWSService) ListUsers(accountID string) ([]models.User, error) {
 			PasswordSet: true,
 			AccessKeys: []models.AccessKey{
 				{
-					AccessKeyID: "AKIAIOSFODNN7EXAMPLE",
-					Status:      "Active",
-					CreateDate:  time.Now(),
+					AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
+					Status:          "Active",
+					CreateDate:      time.Now(),
+					LastUsedDate:    &lastUsedDate,
+					LastUsedService: "ec2",
+					LastUsedRegion:  "us-east-1",
 				},
 			},
 		},
@@ -43,6 +48,7 @@ func (m *MockAWSService) ListUsers(accountID string) ([]models.User, error) {
 }
 
 func (m *MockAWSService) GetUser(accountID, username string) (*models.User, error) {
+	lastUsedDate := time.Now().Add(-48 * time.Hour) // 2 days ago
 	user := &models.User{
 		Username:    "testuser1",
 		UserID:      "AIDACKCEVSQ6C2EXAMPLE",
@@ -51,9 +57,12 @@ func (m *MockAWSService) GetUser(accountID, username string) (*models.User, erro
 		PasswordSet: true,
 		AccessKeys: []models.AccessKey{
 			{
-				AccessKeyID: "AKIAIOSFODNN7EXAMPLE",
-				Status:      "Active",
-				CreateDate:  time.Now(),
+				AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
+				Status:          "Active",
+				CreateDate:      time.Now(),
+				LastUsedDate:    &lastUsedDate,
+				LastUsedService: "ec2",
+				LastUsedRegion:  "us-east-1",
 			},
 		},
 	}
@@ -112,6 +121,116 @@ func (m *MockAWSService) ListPublicIPs() ([]models.PublicIP, error) {
 	}, nil
 }
 
+func (m *MockAWSService) DeleteUserPassword(accountID, username string) error {
+	return nil
+}
+
+func (m *MockAWSService) RotateUserPassword(accountID, username string) (map[string]any, error) {
+	return map[string]any{
+		"message":      "User password rotated successfully",
+		"new_password": "NewRandomPassword123!",
+		"username":     username,
+	}, nil
+}
+
+func (m *MockAWSService) ClearCache() {}
+
+func (m *MockAWSService) InvalidateAccountCache(accountID string) {}
+
+func (m *MockAWSService) InvalidateUserCache(accountID, username string) {}
+
+func (m *MockAWSService) InvalidatePublicIPsCache() {}
+
+func (m *MockAWSService) ListSecurityGroups() ([]models.SecurityGroup, error) {
+	return []models.SecurityGroup{
+		{
+			GroupID:     "sg-12345678",
+			GroupName:   "test-security-group",
+			Description: "Test security group with open ports",
+			AccountID:   "123456789012",
+			AccountName: "Test Account 1",
+			Region:      "us-east-1",
+			VpcID:       "vpc-12345678",
+			IsDefault:   false,
+			IngressRules: []models.SecurityGroupRule{
+				{
+					IpProtocol: "tcp",
+					FromPort:   80,
+					ToPort:     80,
+					CidrIPv4:   "0.0.0.0/0",
+				},
+			},
+			EgressRules: []models.SecurityGroupRule{
+				{
+					IpProtocol: "-1",
+					CidrIPv4:   "0.0.0.0/0",
+				},
+			},
+			HasOpenPorts: true,
+			OpenPortsInfo: []models.OpenPortInfo{
+				{
+					Protocol:    "tcp",
+					PortRange:   "80",
+					Source:      "0.0.0.0/0 (IPv4 Internet)",
+					Description: "TCP traffic",
+				},
+			},
+			IsUnused: false,
+			UsageInfo: models.SecurityGroupUsage{
+				AttachedToInstances: []string{"i-1234567890abcdef0"},
+				TotalAttachments:    1,
+			},
+		},
+		{
+			GroupID:     "sg-87654321",
+			GroupName:   "default",
+			Description: "Default security group for VPC",
+			AccountID:   "123456789013",
+			AccountName: "Test Account 2",
+			Region:      "us-west-2",
+			VpcID:       "vpc-87654321",
+			IsDefault:   true,
+			IngressRules: []models.SecurityGroupRule{
+				{
+					IpProtocol: "tcp",
+					FromPort:   22,
+					ToPort:     22,
+					CidrIPv4:   "10.0.0.0/8",
+				},
+			},
+			EgressRules: []models.SecurityGroupRule{
+				{
+					IpProtocol: "-1",
+					CidrIPv4:   "0.0.0.0/0",
+				},
+			},
+			HasOpenPorts:  false,
+			OpenPortsInfo: []models.OpenPortInfo{},
+			IsUnused:      true,
+			UsageInfo: models.SecurityGroupUsage{
+				TotalAttachments: 0,
+			},
+		},
+	}, nil
+}
+
+func (m *MockAWSService) InvalidateSecurityGroupsCache() {}
+
+func (m *MockAWSService) DeleteSecurityGroup(accountID, region, groupID string) error {
+	// Mock implementation - simulate successful deletion for non-default groups
+	if groupID == "sg-default" {
+		return fmt.Errorf("cannot delete default security group")
+	}
+	if groupID == "sg-in-use" {
+		return fmt.Errorf("security group %s is still in use (attached to 2 resources)", groupID)
+	}
+	if groupID == "sg-not-found" {
+		return fmt.Errorf("security group %s not found", groupID)
+	}
+	// For all other group IDs, simulate successful deletion
+	return nil
+}
+
 func setupRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -129,6 +248,8 @@ func setupRouter() *gin.Engine {
 		api.DELETE("/accounts/:accountId/users/:username/keys/:keyId", handler.DeleteAccessKey)
 		api.PUT("/accounts/:accountId/users/:username/keys/:keyId/rotate", handler.RotateAccessKey)
 		api.GET("/public-ips", handler.ListPublicIPs)
+		api.GET("/security-groups", handler.ListSecurityGroups)
+		api.DELETE("/accounts/:accountId/regions/:region/security-groups/:groupId", handler.DeleteSecurityGroup)
 	}
 
 	return r
@@ -267,4 +388,130 @@ func TestListPublicIPs(t *testing.T) {
 	assert.Equal(t, "52.98.76.54", ips[1].IPAddress)
 	assert.Equal(t, "application", ips[1].ResourceType)
 	assert.Equal(t, "us-west-2", ips[1].Region)
+}
+
+func TestListSecurityGroups(t *testing.T) {
+	router := setupRouter()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/security-groups", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var sgs []models.SecurityGroup
+	err := json.Unmarshal(w.Body.Bytes(), &sgs)
+	assert.NoError(t, err)
+	assert.Len(t, sgs, 2)
+
+	// Test first security group (with open ports)
+	assert.Equal(t, "sg-12345678", sgs[0].GroupID)
+	assert.Equal(t, "test-security-group", sgs[0].GroupName)
+	assert.Equal(t, "Test security group with open ports", sgs[0].Description)
+	assert.Equal(t, "123456789012", sgs[0].AccountID)
+	assert.Equal(t, "Test Account 1", sgs[0].AccountName)
+	assert.Equal(t, "us-east-1", sgs[0].Region)
+	assert.Equal(t, "vpc-12345678", sgs[0].VpcID)
+	assert.False(t, sgs[0].IsDefault)
+	assert.True(t, sgs[0].HasOpenPorts)
+	assert.Len(t, sgs[0].IngressRules, 1)
+	assert.Len(t, sgs[0].EgressRules, 1)
+	assert.Len(t, sgs[0].OpenPortsInfo, 1)
+
+	// Test second security group (default, no open ports)
+	assert.Equal(t, "sg-87654321", sgs[1].GroupID)
+	assert.Equal(t, "default", sgs[1].GroupName)
+	assert.Equal(t, "Default security group for VPC", sgs[1].Description)
+	assert.Equal(t, "123456789013", sgs[1].AccountID)
+	assert.Equal(t, "Test Account 2", sgs[1].AccountName)
+	assert.Equal(t, "us-west-2", sgs[1].Region)
+	assert.Equal(t, "vpc-87654321", sgs[1].VpcID)
+	assert.True(t, sgs[1].IsDefault)
+	assert.False(t, sgs[1].HasOpenPorts)
+	assert.Len(t, sgs[1].IngressRules, 1)
+	assert.Len(t, sgs[1].EgressRules, 1)
+	assert.Len(t, sgs[1].OpenPortsInfo, 0)
+
+	// Test open ports info detail
+	openPort := sgs[0].OpenPortsInfo[0]
+	assert.Equal(t, "tcp", openPort.Protocol)
+	assert.Equal(t, "80", openPort.PortRange)
+	assert.Equal(t, "0.0.0.0/0 (IPv4 Internet)", openPort.Source)
+	assert.Equal(t, "TCP traffic", openPort.Description)
+}
+
+func TestDeleteSecurityGroup(t *testing.T) {
+	router := setupRouter()
+
+	tests := []struct {
+		name           string
+		accountID      string
+		region         string
+		groupID        string
+		expectedStatus int
+		expectError    bool
+	}{
+		{
+			name:           "Delete valid security group",
+			accountID:      "123456789012",
+			region:         "us-east-1",
+			groupID:        "sg-12345678",
+			expectedStatus: http.StatusOK,
+			expectError:    false,
+		},
+		{
+			name:           "Delete default security group",
+			accountID:      "123456789012",
+			region:         "us-east-1",
+			groupID:        "sg-default",
+			expectedStatus: http.StatusConflict,
+			expectError:    true,
+		},
+		{
+			name:           "Delete security group in use",
+			accountID:      "123456789012",
+			region:         "us-east-1",
+			groupID:        "sg-in-use",
+			expectedStatus: http.StatusConflict,
+			expectError:    true,
+		},
+		{
+			name:           "Delete non-existent security group",
+			accountID:      "123456789012",
+			region:         "us-east-1",
+			groupID:        "sg-not-found",
+			expectedStatus: http.StatusNotFound,
+			expectError:    true,
+		},
+		{
+			name:           "Missing parameters",
+			accountID:      "",
+			region:         "us-east-1",
+			groupID:        "sg-12345678",
+			expectedStatus: http.StatusBadRequest,
+			expectError:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url := fmt.Sprintf("/api/accounts/%s/regions/%s/security-groups/%s", tt.accountID, tt.region, tt.groupID)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("DELETE", url, nil)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			var response map[string]any
+			err := json.Unmarshal(w.Body.Bytes(), &response)
+			assert.NoError(t, err)
+
+			if tt.expectError {
+				assert.Contains(t, response, "error")
+			} else {
+				assert.Contains(t, response, "message")
+				assert.Contains(t, response["message"], "deleted successfully")
+			}
+		})
+	}
 }

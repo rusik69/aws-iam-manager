@@ -1,4 +1,4 @@
-.PHONY: up down build rebuild logs shell clean stop restart status install-compose build-frontend build-backend build-cli dev-cli test fmt lint install check install-linter tidy deps dev preview clean-build ci pre-commit build-prod build-release release help deploy-user remove-user create-role remove-role deploy-stackset status-stackset delete-stackset cli-status check-aws-config
+.PHONY: up down build rebuild logs shell clean stop restart status install-compose build-frontend build-backend build-cli dev-cli test fmt lint install check install-linter tidy deps dev preview clean-build ci pre-commit build-prod build-release release help deploy-user remove-user create-role remove-role deploy-stackset status-stackset delete-stackset cli-status check-aws-config deploy-to
 
 # Docker compose command (try docker-compose first, fallback to docker compose)
 DOCKER_COMPOSE := $(shell command -v docker-compose 2> /dev/null || echo "docker compose")
@@ -47,6 +47,7 @@ help:
 	@echo "  status-stackset  - Show StackSet deployment status"
 	@echo "  delete-stackset  - Delete StackSet and all instances"
 	@echo "  cli-status       - Show current deployment status"
+	@echo "  deploy-to HOST=host - Deploy application to specified host"
 	@echo ""
 	@echo "🧹 Cleanup:"
 	@echo "  clean            - Clean everything"
@@ -54,6 +55,15 @@ help:
 	@echo ""
 	@echo "🔧 Setup & Configuration:"
 	@echo "  check-aws-config - Verify AWS credentials and configuration"
+	@echo ""
+	@echo "🚀 CI/CD & Quality:"
+	@echo "  ci               - Run all CI checks locally"
+	@echo "  test-coverage    - Generate test coverage report"
+	@echo "  security-scan    - Run security analysis with gosec"
+	@echo "  lint-docker      - Lint Dockerfile with hadolint"
+	@echo "  validate-workflows - Validate GitHub Actions workflows"
+	@echo "  pre-commit       - Run all pre-commit checks"
+	@echo "  release-build    - Create release build artifacts"
 	@echo ""
 	@echo "📖 CLI Usage Examples:"
 	@echo "  cli-help         - Show CLI help"
@@ -165,8 +175,8 @@ test:
 	cd frontend && npm test
 
 # Run tests with coverage
-test-coverage:
-	@echo "🧪 Running tests with coverage..."
+test-coverage-basic:
+	@echo "🧪 Running tests with basic coverage..."
 	cd backend && go test -cover ./...
 	cd frontend && npm run test -- --coverage
 
@@ -208,8 +218,8 @@ check: fmt lint test
 	@echo "✅ All checks passed!"
 
 # CI pipeline
-ci: tidy deps check build
-	@echo "✅ CI pipeline completed successfully!"
+ci-basic: tidy deps check build
+	@echo "✅ Basic CI pipeline completed successfully!"
 
 # Pre-commit checks (lighter than CI)
 pre-commit: fmt lint test
@@ -421,6 +431,25 @@ cli-status: build-cli
 		exit 1; \
 	fi
 
+# Deploy application to specified host
+deploy-to:
+	@if [ -z "$(HOST)" ]; then \
+		echo "❌ Error: HOST parameter is required. Usage: make deploy-to HOST=your-host"; \
+		exit 1; \
+	fi
+	@echo "🚀 Deploying application to $(HOST)..."
+	@echo "📦 Building production release..."
+	$(MAKE) build-release
+	@echo "📤 Copying files to $(HOST)..."
+	@scp -r bin/release docker-compose.yml Dockerfile .env.example $(HOST):~/aws-iam-manager/
+	@echo "🐳 Starting application on $(HOST)..."
+	@ssh $(HOST) 'cd ~/aws-iam-manager && \
+		chmod +x bin/release/aws-iam-manager-server-linux-amd64 && \
+		docker-compose down 2>/dev/null || true && \
+		docker-compose up -d --build'
+	@echo "✅ Application deployed successfully to $(HOST)"
+	@echo "💡 The application should be available at http://$(HOST):8080"
+
 # ============================================================================
 # CLEANUP TARGETS
 # ============================================================================
@@ -469,3 +498,68 @@ install-compose-local:
 	chmod +x ~/bin/docker-compose
 	@echo "✅ docker-compose installed to ~/bin/docker-compose"
 	@echo "💡 Add ~/bin to your PATH: export PATH=\$$HOME/bin:\$$PATH"
+
+# ============================================================================
+# CI/CD TARGETS
+# ============================================================================
+
+# Run all CI checks locally
+ci: check test-coverage docker-build
+	@echo "✅ All CI checks completed successfully"
+
+# Generate test coverage report
+test-coverage:
+	@echo "📊 Running tests with coverage..."
+	go test -race -coverprofile=coverage.out -covermode=atomic ./...
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "📊 Coverage report generated: coverage.html"
+
+# Security scan with gosec
+security-scan:
+	@echo "🔒 Running security scan..."
+	@if ! command -v gosec >/dev/null 2>&1; then \
+		echo "Installing gosec..."; \
+		go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest; \
+	fi
+	gosec -fmt sarif -out gosec.sarif ./...
+	gosec ./...
+
+# Lint Dockerfile with hadolint
+lint-docker:
+	@echo "🐳 Linting Dockerfile..."
+	@if command -v hadolint >/dev/null 2>&1; then \
+		hadolint Dockerfile; \
+	else \
+		docker run --rm -i hadolint/hadolint < Dockerfile; \
+	fi
+
+# Build multi-architecture Docker image
+docker-build-multiarch:
+	@echo "🐳 Building multi-architecture Docker image..."
+	docker buildx create --use --name multiarch-builder || true
+	docker buildx build --platform linux/amd64,linux/arm64 -t aws-iam-manager:latest .
+	docker buildx rm multiarch-builder
+
+# Validate GitHub Actions workflows
+validate-workflows:
+	@echo "🔧 Validating GitHub Actions workflows..."
+	@if command -v actionlint >/dev/null 2>&1; then \
+		actionlint; \
+	else \
+		echo "Installing actionlint..."; \
+		go install github.com/rhymond/actionlint/cmd/actionlint@latest; \
+		actionlint; \
+	fi
+
+# Pre-commit checks (run before committing)
+pre-commit: fmt lint test security-scan lint-docker validate-workflows
+	@echo "✅ All pre-commit checks passed"
+
+# Create release build
+release-build: clean build-prod
+	@echo "📦 Creating release artifacts..."
+	@mkdir -p dist
+	@cp aws-iam-manager dist/
+	@cp -r frontend/dist dist/frontend
+	@tar -czf dist/aws-iam-manager-release.tar.gz -C dist aws-iam-manager frontend
+	@echo "✅ Release build created: dist/aws-iam-manager-release.tar.gz"
