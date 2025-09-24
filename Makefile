@@ -1,4 +1,4 @@
-.PHONY: up down build rebuild logs shell clean stop restart status install-compose build-frontend build-backend build-cli dev-cli test fmt lint install check install-linter tidy deps dev preview clean-build ci pre-commit build-prod build-release release help deploy-user remove-user create-role remove-role deploy-stackset status-stackset delete-stackset cli-status check-aws-config deploy-to
+.PHONY: up down build rebuild logs shell clean stop restart status install-compose build-frontend build-backend build-cli dev-cli test fmt lint install check install-linter tidy deps dev preview clean-build ci pre-commit build-prod build-release release help deploy-user remove-user create-role remove-role deploy-stackset status-stackset delete-stackset cli-status check-aws-config deploy-to docker-build docker-build-ghcr docker-build-multiarch docker-build-multiarch-push docker-push-ghcr lint-docker
 
 # Docker compose command (try docker-compose first, fallback to docker compose)
 DOCKER_COMPOSE := $(shell command -v docker-compose 2> /dev/null || echo "docker compose")
@@ -37,6 +37,11 @@ help:
 	@echo "  shell            - Access container shell"
 	@echo "  restart          - Restart services"
 	@echo "  status           - Show service status"
+	@echo "  docker-build     - Build Docker image"
+	@echo "  docker-build-ghcr - Build Docker image for GitHub Container Registry"
+	@echo "  docker-build-multiarch - Build multi-architecture Docker image"
+	@echo "  docker-push-ghcr - Push Docker image to GitHub Container Registry"
+	@echo "  lint-docker      - Lint Dockerfile"
 	@echo ""
 	@echo "☁️  AWS IAM Management:"
 	@echo "  deploy-user      - Deploy IAM user and resources"
@@ -533,12 +538,34 @@ lint-docker:
 		docker run --rm -i hadolint/hadolint < Dockerfile; \
 	fi
 
+# Build Docker image
+docker-build: build-frontend
+	@echo "🐳 Building Docker image..."
+	docker build -t aws-iam-manager:latest .
+
+# Build and tag Docker image for GitHub Container Registry
+docker-build-ghcr: build-frontend
+	@echo "🐳 Building Docker image for GHCR..."
+	docker build -t ghcr.io/rusik69/aws-iam-manager:latest .
+
 # Build multi-architecture Docker image
-docker-build-multiarch:
+docker-build-multiarch: build-frontend
 	@echo "🐳 Building multi-architecture Docker image..."
 	docker buildx create --use --name multiarch-builder || true
 	docker buildx build --platform linux/amd64,linux/arm64 -t aws-iam-manager:latest .
 	docker buildx rm multiarch-builder
+
+# Build multi-architecture Docker image and push to registry
+docker-build-multiarch-push: build-frontend
+	@echo "🐳 Building and pushing multi-architecture Docker image..."
+	docker buildx create --use --name multiarch-builder || true
+	docker buildx build --platform linux/amd64,linux/arm64 --push -t $(IMAGE_TAG) .
+	docker buildx rm multiarch-builder
+
+# Push Docker image to GitHub Container Registry
+docker-push-ghcr: docker-build-ghcr
+	@echo "📤 Pushing Docker image to GHCR..."
+	docker push ghcr.io/rusik69/aws-iam-manager:latest
 
 # Validate GitHub Actions workflows
 validate-workflows:
