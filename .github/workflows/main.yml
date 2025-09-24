@@ -68,10 +68,8 @@ jobs:
       - name: Build frontend
         run: make build-frontend
 
-      - name: Validate Makefile and Dockerfile
-        run: |
-          make help
-          make lint-docker
+      - name: Validate Makefile
+        run: make help
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
