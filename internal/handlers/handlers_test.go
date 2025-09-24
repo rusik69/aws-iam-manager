@@ -216,6 +216,66 @@ func (m *MockAWSService) ListSecurityGroups() ([]models.SecurityGroup, error) {
 
 func (m *MockAWSService) InvalidateSecurityGroupsCache() {}
 
+func (m *MockAWSService) InvalidateAccountSecurityGroupsCache(accountID string) {}
+
+func (m *MockAWSService) ListSecurityGroupsByAccount(accountID string) ([]models.SecurityGroup, error) {
+	// Return filtered security groups for the specific account
+	allSGs, _ := m.ListSecurityGroups()
+	var accountSGs []models.SecurityGroup
+	for _, sg := range allSGs {
+		if sg.AccountID == accountID {
+			accountSGs = append(accountSGs, sg)
+		}
+	}
+	return accountSGs, nil
+}
+
+func (m *MockAWSService) GetSecurityGroup(accountID, region, groupID string) (*models.SecurityGroup, error) {
+	// Return a mock security group based on the groupID
+	if groupID == "sg-not-found" {
+		return nil, fmt.Errorf("security group %s not found", groupID)
+	}
+
+	return &models.SecurityGroup{
+		GroupID:     groupID,
+		GroupName:   "test-security-group",
+		Description: "Test security group",
+		AccountID:   accountID,
+		AccountName: "Test Account",
+		Region:      region,
+		VpcID:       "vpc-12345678",
+		IsDefault:   groupID == "sg-default",
+		IngressRules: []models.SecurityGroupRule{
+			{
+				IpProtocol: "tcp",
+				FromPort:   80,
+				ToPort:     80,
+				CidrIPv4:   "0.0.0.0/0",
+			},
+		},
+		EgressRules: []models.SecurityGroupRule{
+			{
+				IpProtocol: "-1",
+				CidrIPv4:   "0.0.0.0/0",
+			},
+		},
+		HasOpenPorts: groupID != "sg-default",
+		OpenPortsInfo: []models.OpenPortInfo{
+			{
+				Protocol:    "tcp",
+				PortRange:   "80",
+				Source:      "0.0.0.0/0 (IPv4 Internet)",
+				Description: "TCP traffic",
+			},
+		},
+		IsUnused: false,
+		UsageInfo: models.SecurityGroupUsage{
+			AttachedToInstances: []string{"i-1234567890abcdef0"},
+			TotalAttachments:    1,
+		},
+	}, nil
+}
+
 func (m *MockAWSService) DeleteSecurityGroup(accountID, region, groupID string) error {
 	// Mock implementation - simulate successful deletion for non-default groups
 	if groupID == "sg-default" {
