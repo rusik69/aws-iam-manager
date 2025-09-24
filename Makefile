@@ -85,7 +85,8 @@ build-frontend:
 # Backend build
 build-backend:
 	@echo "🔧 Building backend server..."
-	cd backend && go build -o ../bin/aws-iam-manager ./cmd/server
+	mkdir -p bin
+	go build -o bin/aws-iam-manager ./cmd/server
 
 # CLI build
 build-cli:
@@ -112,7 +113,8 @@ build:
 build-prod:
 	@echo "🚀 Building for production..."
 	$(MAKE) build-frontend
-	cd backend && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags '-w -s' -o ../bin/aws-iam-manager-prod ./cmd/server
+	mkdir -p bin
+	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags '-w -s' -o bin/aws-iam-manager-prod ./cmd/server
 	$(MAKE) build-cli
 
 # Multi-platform release binaries
@@ -121,11 +123,11 @@ build-release:
 	@mkdir -p bin/release
 	$(MAKE) build-frontend
 	# Backend server
-	cd backend && GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ../bin/release/aws-iam-manager-server-linux-amd64 ./cmd/server
-	cd backend && GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o ../bin/release/aws-iam-manager-server-linux-arm64 ./cmd/server
-	cd backend && GOOS=darwin GOARCH=amd64 go build -ldflags="-w -s" -o ../bin/release/aws-iam-manager-server-darwin-amd64 ./cmd/server
-	cd backend && GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o ../bin/release/aws-iam-manager-server-darwin-arm64 ./cmd/server
-	cd backend && GOOS=windows GOARCH=amd64 go build -ldflags="-w -s" -o ../bin/release/aws-iam-manager-server-windows-amd64.exe ./cmd/server
+	GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o bin/release/aws-iam-manager-server-linux-amd64 ./cmd/server
+	GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o bin/release/aws-iam-manager-server-linux-arm64 ./cmd/server
+	GOOS=darwin GOARCH=amd64 go build -ldflags="-w -s" -o bin/release/aws-iam-manager-server-darwin-amd64 ./cmd/server
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o bin/release/aws-iam-manager-server-darwin-arm64 ./cmd/server
+	GOOS=windows GOARCH=amd64 go build -ldflags="-w -s" -o bin/release/aws-iam-manager-server-windows-amd64.exe ./cmd/server
 	# CLI binary
 	GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o bin/release/iam-manager-linux-amd64 ./cmd/iam-manager
 	GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o bin/release/iam-manager-linux-arm64 ./cmd/iam-manager
@@ -152,7 +154,7 @@ dev-frontend:
 # Backend development server
 dev-backend:
 	@echo "🔧 Starting backend development server..."
-	cd backend && @which air > /dev/null && air || go run ./cmd/server
+	@which air > /dev/null && air || go run ./cmd/server
 
 # CLI development
 dev-cli:
@@ -175,28 +177,26 @@ preview:
 # Run all tests
 test:
 	@echo "🧪 Running tests..."
-	cd backend && go test ./...
-	go test ./cmd/iam-manager
+	go test ./...
 	cd frontend && npm test
 
 # Run tests with coverage
 test-coverage-basic:
 	@echo "🧪 Running tests with basic coverage..."
-	cd backend && go test -cover ./...
+	go test -cover ./...
 	cd frontend && npm run test -- --coverage
 
 # Run tests with verbose output
 test-verbose:
 	@echo "🧪 Running verbose tests..."
-	cd backend && go test -v ./...
+	go test -v ./...
 
 # Format all code
 fmt:
 	@echo "✨ Formatting code..."
 	@if command -v go >/dev/null 2>&1; then \
 		echo "  📝 Formatting Go code..."; \
-		go fmt ./cmd/iam-manager/...; \
-		cd backend && go fmt ./...; \
+		go fmt ./...; \
 	else \
 		echo "⚠️  Go not installed, skipping Go formatting"; \
 	fi
@@ -208,12 +208,10 @@ lint:
 	@echo "🔍 Linting code..."
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		echo "  🔍 Running golangci-lint on Go code..."; \
-		golangci-lint run ./cmd/iam-manager/...; \
-		cd backend && golangci-lint run; \
+		golangci-lint run ./...; \
 	else \
 		echo "  ⚠️  golangci-lint not found, using basic go vet"; \
-		go vet ./cmd/iam-manager; \
-		cd backend && go vet ./...; \
+		go vet ./...; \
 	fi
 	@echo "  🔍 Linting frontend code..."
 	@cd frontend && (which eslint > /dev/null && npm run lint || echo "    ESLint not configured")
@@ -237,13 +235,11 @@ pre-commit: fmt lint test
 tidy:
 	@echo "🧹 Tidying Go dependencies..."
 	go mod tidy
-	cd backend && go mod tidy
 
 # Download Go dependencies
 deps:
 	@echo "📦 Downloading dependencies..."
 	go mod download
-	cd backend && go mod download
 	cd frontend && npm install
 
 # Install frontend dependencies (production)
