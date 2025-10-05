@@ -4,13 +4,14 @@
       <div class="container">
         <div class="logo">
           <router-link to="/" class="logo-link">
-            <h1>AWS IAM Manager</h1>
+            <h1>Cloud IAM Manager</h1>
           </router-link>
         </div>
         <nav>
           <router-link to="/" class="nav-link">Users</router-link>
           <router-link to="/public-ips" class="nav-link">Public IPs</router-link>
           <router-link to="/security-groups" class="nav-link">Security Groups</router-link>
+          <router-link to="/azure/enterprise-apps" class="nav-link">Azure Apps</router-link>
           <button @click="toggleTheme" class="theme-btn">
             {{ isDarkTheme ? '☀️' : '🌙' }}
           </button>

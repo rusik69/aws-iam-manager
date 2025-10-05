@@ -57,7 +57,7 @@ func main() {
 This tool handles user creation, policy management, StackSet deployment, and cross-account access setup.`,
 	}
 
-	// Add commands
+	// Add AWS commands
 	rootCmd.AddCommand(deployCmd())
 	rootCmd.AddCommand(removeCmd())
 	rootCmd.AddCommand(createRoleCmd())
@@ -66,6 +66,16 @@ This tool handles user creation, policy management, StackSet deployment, and cro
 	rootCmd.AddCommand(stacksetStatusCmd())
 	rootCmd.AddCommand(stacksetDeleteCmd())
 	rootCmd.AddCommand(statusCmd())
+
+	// Add Azure commands
+	azureCmd := &cobra.Command{
+		Use:   "azure",
+		Short: "Azure AD operations",
+		Long:  `Manage Azure AD enterprise applications and service principals.`,
+	}
+	azureCmd.AddCommand(azureListAppsCmd())
+	azureCmd.AddCommand(azureDeleteAppCmd())
+	rootCmd.AddCommand(azureCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

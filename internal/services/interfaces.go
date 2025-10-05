@@ -1,6 +1,10 @@
 package services
 
-import "github.com/rusik69/aws-iam-manager/internal/models"
+import (
+	"context"
+
+	"github.com/rusik69/aws-iam-manager/internal/models"
+)
 
 type AWSServiceInterface interface {
 	ListAccounts() ([]models.Account, error)
@@ -24,4 +28,14 @@ type AWSServiceInterface interface {
 	InvalidatePublicIPsCache()
 	InvalidateSecurityGroupsCache()
 	InvalidateAccountSecurityGroupsCache(accountID string)
+}
+
+type AzureServiceInterface interface {
+	ListEnterpriseApplications(ctx context.Context) ([]models.AzureEnterpriseApplication, error)
+	GetEnterpriseApplication(ctx context.Context, appID string) (*models.AzureEnterpriseApplication, error)
+	DeleteEnterpriseApplication(ctx context.Context, appID string) error
+	// Cache management methods
+	ClearCache()
+	InvalidateEnterpriseApplicationsCache()
+	InvalidateEnterpriseApplicationCache(appID string)
 }

@@ -17,17 +17,30 @@ import (
 // TODO: Add embed support for production builds
 
 type Server struct {
-	config  config.Config
-	handler *handlers.Handler
+	config       config.Config
+	handler      *handlers.Handler
+	azureHandler *handlers.AzureHandler
 }
 
 func NewServer(cfg config.Config) *Server {
 	awsService := services.NewAWSService(cfg)
 	handler := handlers.NewHandler(awsService)
 
+	// Initialize Azure handler (optional - will log error if credentials not configured)
+	var azureHandler *handlers.AzureHandler
+	azureService, err := services.NewAzureService()
+	if err != nil {
+		log.Printf("[WARNING] Azure service not initialized: %v", err)
+		log.Printf("[INFO] Azure endpoints will not be available. Set AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET to enable Azure features.")
+	} else {
+		azureHandler = handlers.NewAzureHandler(azureService)
+		log.Printf("[INFO] Azure service initialized successfully")
+	}
+
 	return &Server{
-		config:  cfg,
-		handler: handler,
+		config:       cfg,
+		handler:      handler,
+		azureHandler: azureHandler,
 	}
 }
 
@@ -62,7 +75,7 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.POST("/accounts/:accountId/users/:username/keys", s.handler.CreateAccessKey)
 		api.DELETE("/accounts/:accountId/users/:username/keys/:keyId", s.handler.DeleteAccessKey)
 		api.PUT("/accounts/:accountId/users/:username/keys/:keyId/rotate", s.handler.RotateAccessKey)
-		
+
 		// IP management routes
 		api.GET("/public-ips", s.handler.ListPublicIPs)
 
@@ -71,6 +84,21 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.GET("/accounts/:accountId/security-groups", s.handler.ListSecurityGroupsByAccount)
 		api.GET("/accounts/:accountId/regions/:region/security-groups/:groupId", s.handler.GetSecurityGroup)
 		api.DELETE("/accounts/:accountId/regions/:region/security-groups/:groupId", s.handler.DeleteSecurityGroup)
+
+		// Azure enterprise applications routes (if Azure is configured)
+		if s.azureHandler != nil {
+			azure := api.Group("/azure")
+			{
+				azure.GET("/enterprise-applications", s.azureHandler.ListEnterpriseApplications)
+				azure.GET("/enterprise-applications/:appId", s.azureHandler.GetEnterpriseApplication)
+				azure.DELETE("/enterprise-applications/:appId", s.azureHandler.DeleteEnterpriseApplication)
+
+				// Azure cache management routes
+				azure.POST("/cache/clear", s.azureHandler.ClearAzureCache)
+				azure.POST("/cache/enterprise-applications/invalidate", s.azureHandler.InvalidateEnterpriseApplicationsCache)
+				azure.POST("/cache/enterprise-applications/:appId/invalidate", s.azureHandler.InvalidateEnterpriseApplicationCache)
+			}
+		}
 
 		// Cache management routes
 		api.POST("/cache/clear", s.handler.ClearCache)

@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oauth2-proxy-config
+  namespace: aws-iam-manager
+  labels:
+    app.kubernetes.io/name: oauth2-proxy
+    app.kubernetes.io/component: config
+data:
+  authenticated-emails.txt: |
+    # Add authorized email addresses, one per line
+    # Example:
+    # user@example.com
+    # admin@company.com
+
+    # Add your authorized users below:
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: aws-iam-manager
+  labels:
+    app.kubernetes.io/name: aws-iam-manager
+    app.kubernetes.io/component: config
+data:
+  AWS_REGION: "us-east-1"
+  PORT: "8080"
+  GIN_MODE: "release"
+  IAM_ORG_ROLE_NAME: "IAMManagerCrossAccountRole"

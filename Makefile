@@ -1,7 +1,5 @@
-.PHONY: up down build rebuild logs shell clean stop restart status install-compose build-frontend build-backend build-cli dev-cli test fmt lint install check install-linter tidy deps dev preview clean-build ci pre-commit build-prod build-release release help deploy-user remove-user create-role remove-role deploy-stackset status-stackset delete-stackset cli-status check-aws-config deploy-to docker-build docker-build-ghcr docker-build-multiarch docker-build-multiarch-push docker-push-ghcr lint-docker
+.PHONY: build build-frontend build-backend build-cli dev-cli test fmt lint install check install-linter tidy deps dev preview clean-build ci pre-commit build-prod build-release release help deploy-user remove-user create-role remove-role deploy-stackset status-stackset delete-stackset cli-status check-aws-config deploy validate-prod-env docker-build docker-build-ghcr docker-build-multiarch docker-build-multiarch-push docker-push-ghcr lint-docker
 
-# Docker compose command (try docker-compose first, fallback to docker compose)
-DOCKER_COMPOSE := $(shell command -v docker-compose 2> /dev/null || echo "docker compose")
 
 # Default target
 help:
@@ -31,12 +29,6 @@ help:
 	@echo "  ci               - CI pipeline (install + check + build)"
 	@echo ""
 	@echo "🐳 Docker Operations:"
-	@echo "  up               - Start services"
-	@echo "  down             - Stop services"
-	@echo "  logs             - Show logs"
-	@echo "  shell            - Access container shell"
-	@echo "  restart          - Restart services"
-	@echo "  status           - Show service status"
 	@echo "  docker-build     - Build Docker image"
 	@echo "  docker-build-ghcr - Build Docker image for GitHub Container Registry"
 	@echo "  docker-build-multiarch - Build multi-architecture Docker image"
@@ -52,7 +44,9 @@ help:
 	@echo "  status-stackset  - Show StackSet deployment status"
 	@echo "  delete-stackset  - Delete StackSet and all instances"
 	@echo "  cli-status       - Show current deployment status"
-	@echo "  deploy-to HOST=host - Deploy application to specified host"
+	@echo "  deploy HOST=host [USER=user] - Deploy application to specified host using Kubernetes"
+	@echo "                               (automatically uses .env.prod if available)"
+	@echo "                               Includes Let's Encrypt SSL certificate setup"
 	@echo ""
 	@echo "🧹 Cleanup:"
 	@echo "  clean            - Clean everything"
@@ -60,6 +54,7 @@ help:
 	@echo ""
 	@echo "🔧 Setup & Configuration:"
 	@echo "  check-aws-config - Verify AWS credentials and configuration"
+	@echo "  validate-prod-env - Validate production environment file (.env.prod)"
 	@echo ""
 	@echo "🚀 CI/CD & Quality:"
 	@echo "  ci               - Run all CI checks locally"
@@ -105,9 +100,7 @@ build-cli:
 build-go: build-backend build-cli
 
 # Build everything with Docker
-build:
-	@echo "🐳 Building Docker services..."
-	$(DOCKER_COMPOSE) build
+build: build-frontend docker-build
 
 # Production build with optimizations
 build-prod:
@@ -140,11 +133,8 @@ build-release:
 # DEVELOPMENT TARGETS
 # ============================================================================
 
-# Docker development environment
-dev: rebuild logs
-
-# Rebuild Docker environment
-rebuild: down build up
+# Development with Docker build
+dev: build
 
 # Frontend development server
 dev-frontend:
@@ -250,41 +240,6 @@ install-frontend:
 # ============================================================================
 # DOCKER OPERATIONS
 # ============================================================================
-
-# Start services
-up:
-	@echo "🚀 Starting Docker services..."
-	$(DOCKER_COMPOSE) up -d
-
-# Stop services
-down:
-	@echo "🛑 Stopping Docker services..."
-	$(DOCKER_COMPOSE) down
-
-# Show logs
-logs:
-	@echo "📋 Showing service logs..."
-	$(DOCKER_COMPOSE) logs -f
-
-# Show logs for specific service
-logs-service:
-	$(DOCKER_COMPOSE) logs -f aws-iam-manager
-
-# Access shell in running container
-shell:
-	$(DOCKER_COMPOSE) exec aws-iam-manager sh
-
-# Stop services without removing containers
-stop:
-	$(DOCKER_COMPOSE) stop
-
-# Restart services
-restart:
-	$(DOCKER_COMPOSE) restart
-
-# Show status of services
-status:
-	$(DOCKER_COMPOSE) ps
 
 # ============================================================================
 # CLI USAGE EXAMPLES
@@ -432,33 +387,105 @@ cli-status: build-cli
 		exit 1; \
 	fi
 
-# Deploy application to specified host
-deploy-to:
+# Deploy application to specified host using Kubernetes
+deploy:
 	@if [ -z "$(HOST)" ]; then \
-		echo "❌ Error: HOST parameter is required. Usage: make deploy-to HOST=your-host"; \
+		echo "❌ Error: HOST parameter is required. Usage: make deploy HOST=your-host [USER=username]"; \
 		exit 1; \
 	fi
-	@echo "🚀 Deploying application to $(HOST)..."
-	@echo "📦 Building production release..."
-	$(MAKE) build-release
-	@echo "📤 Copying files to $(HOST)..."
-	@scp -r bin/release docker-compose.yml Dockerfile .env.example $(HOST):~/aws-iam-manager/
-	@echo "🐳 Starting application on $(HOST)..."
-	@ssh $(HOST) 'cd ~/aws-iam-manager && \
-		chmod +x bin/release/aws-iam-manager-server-linux-amd64 && \
-		docker-compose down 2>/dev/null || true && \
-		docker-compose up -d --build'
-	@echo "✅ Application deployed successfully to $(HOST)"
-	@echo "💡 The application should be available at http://$(HOST):8080"
+	$(eval TARGET_HOST := $(if $(USER),$(USER)@$(HOST),$(HOST)))
+	@echo "☸️  Deploying application to $(TARGET_HOST) using Kubernetes..."
+	@echo "📤 Copying Kubernetes manifests to $(TARGET_HOST)..."
+	@scp -r k8s/ $(TARGET_HOST):~/aws-iam-manager/
+	@if [ -f .env.prod ]; then \
+		echo "📤 Copying production environment file (.env.prod)..."; \
+		scp .env.prod $(TARGET_HOST):~/aws-iam-manager/k8s/.env; \
+	else \
+		echo "⚠️  No .env.prod found, creating from .env.example"; \
+		scp .env.example $(TARGET_HOST):~/aws-iam-manager/k8s/.env; \
+	fi
+	@scp -r oauth2-proxy $(TARGET_HOST):~/aws-iam-manager/
+	@echo "☸️  Configuring secrets and deploying to Kubernetes..."
+	@ssh $(TARGET_HOST) 'cd ~/aws-iam-manager && \
+		echo "🔧 Setting OAuth2 redirect URL for host $(HOST)..." && \
+		sed -i.bak "s|OAUTH2_REDIRECT_URL=.*|OAUTH2_REDIRECT_URL=http://$(HOST)/oauth2/callback|" k8s/.env && \
+		echo "☸️  Creating namespace first..." && \
+		kubectl apply -f k8s/namespace.yaml && \
+		echo "🔐 Creating Kubernetes secrets from environment file..." && \
+		kubectl create secret generic app-secrets --namespace=aws-iam-manager \
+			--from-env-file=k8s/.env \
+			--dry-run=client -o yaml | kubectl apply -f - && \
+		echo "📝 Updating ConfigMap with authenticated emails..." && \
+		kubectl create configmap oauth2-proxy-config --namespace=aws-iam-manager \
+			--from-file=authenticated-emails.txt=oauth2-proxy/authenticated-emails.txt \
+			--dry-run=client -o yaml | kubectl apply -f - && \
+		echo "☸️  Applying cert-manager configuration..." && \
+		kubectl apply -f k8s/cert-manager.yaml && \
+		echo "🔧 Creating certificate for domain $(HOST)..." && \
+		sed "s/DOMAIN_PLACEHOLDER/$(HOST)/g" k8s/certificate.yaml | kubectl apply -f - && \
+		echo "🔧 Creating ingress for domain $(HOST)..." && \
+		sed "s/DOMAIN_PLACEHOLDER/$(HOST)/g" k8s/ingress.yaml | kubectl apply -f - && \
+		echo "☸️  Applying remaining Kubernetes manifests..." && \
+		kubectl apply -f k8s/configmap.yaml && \
+		kubectl apply -f k8s/app-deployment.yaml && \
+		kubectl apply -f k8s/oauth2-proxy-deployment.yaml && \
+		kubectl apply -f k8s/service.yaml'
+	@echo "✅ Application deployed successfully to Kubernetes cluster on $(TARGET_HOST)"
+	@echo ""
+	@echo "🌐 External Access Information:"
+	@echo "  📍 HTTPS Access (Port 443): https://$(HOST)"
+	@echo "  📍 HTTP Access (Port 80): http://$(HOST) (redirects to HTTPS)"
+	@echo "  📍 Via Nginx Ingress Controller with Let's Encrypt SSL"
+	@echo "  📍 Traffic flows: Internet → Ingress (SSL termination) → oauth2-proxy service → oauth2-proxy pod → backend"
+	@echo ""
+	@echo "🔍 Checking deployment status..."
+	@ssh $(TARGET_HOST) 'kubectl get pods -n aws-iam-manager && kubectl get services -n aws-iam-manager && kubectl get ingress -n aws-iam-manager && kubectl get certificates -n aws-iam-manager'
+	@echo ""
+	@echo "🔒 SSL Certificate Information:"
+	@echo "   • Let's Encrypt certificate will be automatically provisioned"
+	@echo "   • Certificate status: kubectl get certificates -n aws-iam-manager"
+	@echo "   • Certificate issuer: letsencrypt-prod"
+	@echo ""
+	@echo "💡 External Access:"
+	@echo "   • Primary: https://$(HOST) (HTTPS with Let's Encrypt SSL)"
+	@echo "   • Fallback: http://$(HOST) (redirects to HTTPS)"
+	@echo "   • Requires: Nginx Ingress Controller + cert-manager"
+	@echo "   • OAuth2 authentication is handled by oauth2-proxy"
+	@echo "   • Make sure ports 80 and 443 are open in your firewall/security groups"
+
+# Validate production environment file
+validate-prod-env:
+	@echo "🔍 Validating production environment configuration..."
+	@if [ ! -f .env.prod ]; then \
+		echo "❌ .env.prod not found. Create it from .env.example:"; \
+		echo "   cp .env.example .env.prod"; \
+		echo "   # Edit .env.prod with production values"; \
+		exit 1; \
+	fi
+	@echo "✅ .env.prod exists"
+	@echo "🔍 Checking required variables..."
+	@if ! grep -q "^OAUTH2_CLIENT_ID=" .env.prod || grep -q "^OAUTH2_CLIENT_ID=$$" .env.prod; then \
+		echo "❌ OAUTH2_CLIENT_ID not set in .env.prod"; \
+		exit 1; \
+	fi
+	@if ! grep -q "^OAUTH2_CLIENT_SECRET=" .env.prod || grep -q "^OAUTH2_CLIENT_SECRET=$$" .env.prod; then \
+		echo "❌ OAUTH2_CLIENT_SECRET not set in .env.prod"; \
+		exit 1; \
+	fi
+	@if ! grep -q "^OAUTH2_COOKIE_SECRET=" .env.prod || grep -q "^OAUTH2_COOKIE_SECRET=$$" .env.prod; then \
+		echo "❌ OAUTH2_COOKIE_SECRET not set in .env.prod"; \
+		exit 1; \
+	fi
+	@echo "✅ All required OAuth2 variables are set"
+	@echo "✅ Production environment validation passed"
 
 # ============================================================================
 # CLEANUP TARGETS
 # ============================================================================
 
-# Clean everything (Docker + build artifacts)
+# Clean everything (build artifacts)
 clean:
 	@echo "🧹 Cleaning everything..."
-	$(DOCKER_COMPOSE) down -v --rmi all --remove-orphans || true
 	rm -rf bin/
 	rm -rf frontend/dist/
 	rm -rf frontend/node_modules/
@@ -484,21 +511,6 @@ install-linter:
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v1.54.2
 	@echo "✅ golangci-lint installed to $$(go env GOPATH)/bin"
 
-# Install docker-compose (requires sudo)
-install-compose:
-	@echo "📦 Installing docker-compose to /usr/local/bin (requires sudo)..."
-	sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(shell uname -s)-$(shell uname -m)" -o /usr/local/bin/docker-compose
-	sudo chmod +x /usr/local/bin/docker-compose
-	@echo "✅ docker-compose installed successfully"
-
-# Install docker-compose to user bin (no sudo)
-install-compose-local:
-	@echo "📦 Installing docker-compose to ~/bin..."
-	@mkdir -p ~/bin
-	curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(shell uname -s)-$(shell uname -m)" -o ~/bin/docker-compose
-	chmod +x ~/bin/docker-compose
-	@echo "✅ docker-compose installed to ~/bin/docker-compose"
-	@echo "💡 Add ~/bin to your PATH: export PATH=\$$HOME/bin:\$$PATH"
 
 # ============================================================================
 # CI/CD TARGETS
