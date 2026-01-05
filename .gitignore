@@ -74,3 +74,4 @@ trivy-results.sarif
 .parcel-cache/
 .rpt2_cache_*/
 .rts2_cache_*/
+.claude/*

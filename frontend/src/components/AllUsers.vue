@@ -356,29 +356,26 @@ export default {
     }
   },
   async mounted() {
+    // Initial load when component is first created
     await this.loadData()
   },
-  // Watch for route changes to refresh data when navigating back to this component
-  watch: {
-    '$route'(to, from) {
-      // If we're navigating back to AllUsers from a UserDetail page
-      if (to.path === '/' && from.path && from.path.includes('/accounts/') && from.path.includes('/users/')) {
-        console.log('Navigating back from UserDetail to AllUsers')
-        // Extract account ID from the previous route if possible
-        const accountMatch = from.path.match(/\/accounts\/([^\/]+)\//)
-        if (accountMatch) {
-          const accountId = accountMatch[1]
-          console.log(`Invalidating cache for account ${accountId} and refreshing in background`)
-          this.invalidateAccountAndRefresh(accountId)
-        } else {
-          // Fallback: just refresh data normally (it will use cache where possible)
-          this.loadData()
-        }
-      } else if (to.path === '/') {
-        // For other navigation to AllUsers, just load normally (use cache if available)
-        this.loadData()
-      }
+  // activated is called when a kept-alive component is re-activated
+  activated() {
+    // Check if we're returning from a user deletion (query params from UserDetail)
+    if (this.$route.query.deletedUser && this.$route.query.deletedFromAccount) {
+      const deletedUser = this.$route.query.deletedUser
+      const deletedFromAccount = this.$route.query.deletedFromAccount
+      console.log(`User ${deletedUser} was deleted from account ${deletedFromAccount}, updating local cache`)
+      
+      // Remove the deleted user from local state - no need to reload from server
+      this.allUsers = this.allUsers.filter(
+        user => !(user.accountId === deletedFromAccount && user.username === deletedUser)
+      )
+      
+      // Clear the query params from URL
+      this.$router.replace({ path: '/', query: {} })
     }
+    // Otherwise, keep using cached data - no reload needed
   },
   methods: {
     async loadData() {
@@ -386,50 +383,19 @@ export default {
         this.loading = true
         this.error = null
         
-        // Load accounts first
-        const accountsResponse = await axios.get('/api/accounts')
-        this.accounts = accountsResponse.data
+        // Load accounts and all users in parallel
+        const [accountsResponse, usersResponse] = await Promise.all([
+          axios.get('/api/accounts'),
+          axios.get('/api/users') // Single endpoint that loads all users in parallel on server
+        ])
         
-        // Load users for all accounts
-        await this.loadAllUsers()
+        this.accounts = accountsResponse.data
+        this.allUsers = usersResponse.data || []
         
       } catch (err) {
         this.error = err.response?.data?.error || 'Failed to load data'
       } finally {
         this.loading = false
-      }
-    },
-    
-    async loadAllUsers() {
-      if (!this.accounts || this.accounts.length === 0) return
-      
-      try {
-        const allUsers = []
-        
-        // Load users for each account in parallel
-        const userPromises = this.accounts.map(async (account) => {
-          try {
-            const response = await axios.get(`/api/accounts/${account.id}/users`)
-            const users = response.data || []
-            
-            // Add account info to users
-            const usersWithAccountInfo = users.map(user => ({
-              ...user,
-              accountId: account.id,
-              accountName: account.name
-            }))
-            allUsers.push(...usersWithAccountInfo)
-            
-          } catch (err) {
-            console.warn(`Failed to load users for account ${account.id}:`, err)
-          }
-        })
-        
-        await Promise.all(userPromises)
-        this.allUsers = allUsers
-        
-      } catch (err) {
-        console.error('Failed to load users:', err)
       }
     },
     
@@ -459,48 +425,19 @@ export default {
         // Invalidate cache to get fresh data
         await axios.post('/api/cache/clear')
         
-        // Load accounts first
-        const accountsResponse = await axios.get('/api/accounts')
+        // Load all data in parallel
+        const [accountsResponse, usersResponse] = await Promise.all([
+          axios.get('/api/accounts'),
+          axios.get('/api/users')
+        ])
         this.accounts = accountsResponse.data
-        
-        // Load users for all accounts in background
-        await this.loadAllUsers()
+        this.allUsers = usersResponse.data || []
         
         console.log('Background refresh completed - data updated')
         
       } catch (err) {
         console.warn('Background refresh failed:', err)
         // Keep showing the cached data even if refresh fails
-      }
-    },
-
-    async invalidateAccountAndRefresh(accountId) {
-      try {
-        // Only invalidate the specific account's cache - this is more efficient
-        await axios.post(`/api/cache/accounts/${accountId}/invalidate`)
-        console.log(`Invalidated cache for account ${accountId}`)
-        
-        // If we have existing data, load fresh data without showing loading spinner
-        if (this.allUsers && this.allUsers.length > 0) {
-          console.log('Loading fresh data in background')
-          
-          // Refresh accounts (quick, usually cached)
-          const accountsResponse = await axios.get('/api/accounts')
-          this.accounts = accountsResponse.data
-          
-          // Reload all users (the modified account will be fresh, others may use cache)
-          await this.loadAllUsers()
-          
-          console.log('Account-specific refresh completed')
-        } else {
-          // No existing data, do full load with loading state
-          await this.loadData()
-        }
-        
-      } catch (err) {
-        console.warn('Account invalidation failed:', err)
-        // Fallback to normal load
-        await this.loadData()
       }
     },
     
@@ -597,8 +534,10 @@ export default {
       try {
         await axios.delete(`/api/accounts/${accountId}/users/${username}`)
         alert(`User "${username}" has been successfully deleted.`)
-        // Refresh the data to update the list
-        await this.refreshData()
+        // Remove the user from local state - backend already invalidated its cache
+        this.allUsers = this.allUsers.filter(
+          user => !(user.accountId === accountId && user.username === username)
+        )
       } catch (error) {
         console.error('Failed to delete user:', error)
         alert(error.response?.data?.error || 'Failed to delete user. Please try again.')

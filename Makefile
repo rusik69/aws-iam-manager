@@ -1,4 +1,4 @@
-.PHONY: build build-frontend build-backend build-cli dev-cli test fmt lint install check install-linter tidy deps dev preview clean-build ci pre-commit build-prod build-release release help deploy-user remove-user create-role remove-role deploy-stackset status-stackset delete-stackset cli-status check-aws-config deploy validate-prod-env docker-build docker-build-ghcr docker-build-multiarch docker-build-multiarch-push docker-push-ghcr lint-docker
+.PHONY: build build-frontend build-backend build-cli dev dev-stop dev-logs dev-cli dev-frontend dev-backend test fmt lint install check install-linter tidy deps preview clean-build ci pre-commit build-prod build-release release help deploy-user remove-user create-role remove-role deploy-stackset update-stackset status-stackset remove-stackset delete-stackset cli-status check-aws-config deploy validate-prod-env docker-build docker-build-ghcr docker-build-multiarch docker-build-multiarch-push docker-push-ghcr lint-docker docker-run
 
 
 # Default target
@@ -15,7 +15,9 @@ help:
 	@echo "  build-release    - Multi-platform release binaries"
 	@echo ""
 	@echo "🚀 Development:"
-	@echo "  dev              - Run Docker development environment"
+	@echo "  dev              - Build and deploy to local k8s with .env.prod"
+	@echo "  dev-stop         - Stop and remove local k8s deployment"
+	@echo "  dev-logs         - Show logs from local k8s deployment"
 	@echo "  dev-cli          - Run CLI in development mode"
 	@echo "  dev-frontend     - Run frontend development server"
 	@echo "  dev-backend      - Run backend in development mode"
@@ -33,6 +35,7 @@ help:
 	@echo "  docker-build-ghcr - Build Docker image for GitHub Container Registry"
 	@echo "  docker-build-multiarch - Build multi-architecture Docker image"
 	@echo "  docker-push-ghcr - Push Docker image to GitHub Container Registry"
+	@echo "  docker-run       - Run Docker container locally"
 	@echo "  lint-docker      - Lint Dockerfile"
 	@echo ""
 	@echo "☁️  AWS IAM Management:"
@@ -41,8 +44,10 @@ help:
 	@echo "  create-role      - Create IAM role for cross-account access"
 	@echo "  remove-role      - Remove IAM role and resources"
 	@echo "  deploy-stackset  - Deploy StackSet for organization setup"
+	@echo "  update-stackset  - Update existing StackSet with new template"
 	@echo "  status-stackset  - Show StackSet deployment status"
-	@echo "  delete-stackset  - Delete StackSet and all instances"
+	@echo "  remove-stackset  - Remove StackSet and all instances"
+	@echo "  delete-stackset  - Alias for remove-stackset"
 	@echo "  cli-status       - Show current deployment status"
 	@echo "  deploy HOST=host [USER=user] - Deploy application to specified host using Kubernetes"
 	@echo "                               (automatically uses .env.prod if available)"
@@ -133,18 +138,70 @@ build-release:
 # DEVELOPMENT TARGETS
 # ============================================================================
 
-# Development with Docker build
-dev: build
+# Development mode - builds and deploys to local k8s cluster with .env.prod env vars
+# For Docker Desktop, minikube (with eval $(minikube docker-env)), or kind (with kind load)
+dev:
+	@echo "🚀 Starting development environment in Kubernetes..."
+	@if [ ! -f .env.prod ]; then \
+		echo "❌ Error: .env.prod file not found. Create it with your environment variables."; \
+		exit 1; \
+	fi
+	@echo "📦 Building frontend..."
+	@cd frontend && npm run build
+	@echo "🐳 Building Docker image locally..."
+	@DOCKER_BUILDKIT=1 docker build \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--network=host \
+		-t aws-iam-manager:dev . || \
+		(echo "❌ Docker build failed. Trying without network isolation..." && \
+		 docker build --network=host -t aws-iam-manager:dev .)
+	@echo "☸️  Deploying to Kubernetes cluster..."
+	@kubectl apply -f k8s/namespace.yaml
+	@kubectl create secret generic app-secrets --namespace=aws-iam-manager \
+		--from-env-file=.env.prod \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@kubectl apply -f k8s/configmap.yaml
+	@sed 's|image: ghcr.io/rusik69/aws-iam-manager:latest|image: aws-iam-manager:dev\n        imagePullPolicy: Never|' \
+		k8s/app-deployment.yaml | kubectl apply -f -
+	@kubectl apply -f k8s/service.yaml
+	@echo "⏳ Waiting for deployment to be ready..."
+	@kubectl rollout status deployment/aws-iam-manager -n aws-iam-manager --timeout=120s
+	@echo "✅ Deployment ready!"
+	@echo "💡 Access the app at http://localhost:8080"
+	@echo "🔌 Starting port-forward and showing logs (Ctrl+C to stop)..."
+	@trap 'kill 0' INT TERM; \
+	kubectl port-forward -n aws-iam-manager svc/aws-iam-manager 8080:8080 & \
+	sleep 2 && kubectl logs -f -n aws-iam-manager -l app.kubernetes.io/name=aws-iam-manager & \
+	wait
 
-# Frontend development server
+# Stop local k8s development deployment
+dev-stop:
+	@echo "🛑 Stopping local Kubernetes deployment..."
+	@kubectl delete deployment aws-iam-manager -n aws-iam-manager --ignore-not-found
+	@kubectl delete secret app-secrets -n aws-iam-manager --ignore-not-found
+	@echo "✅ Local deployment stopped"
+
+# Show logs from local k8s deployment
+dev-logs:
+	@kubectl logs -f -n aws-iam-manager -l app.kubernetes.io/name=aws-iam-manager
+
+# Frontend development server (standalone)
 dev-frontend:
 	@echo "🎨 Starting frontend development server..."
-	cd frontend && npm run dev
+	@if [ -f .env.prod ]; then \
+		set -a && . ./.env.prod && set +a && cd frontend && npm run dev; \
+	else \
+		cd frontend && npm run dev; \
+	fi
 
-# Backend development server
+# Backend development server (standalone)
 dev-backend:
 	@echo "🔧 Starting backend development server..."
-	@which air > /dev/null && air || go run ./cmd/server
+	@if [ -f .env.prod ]; then \
+		set -a && . ./.env.prod && set +a && (which air > /dev/null && air || go run ./cmd/server); \
+	else \
+		which air > /dev/null && air || go run ./cmd/server; \
+	fi
 
 # CLI development
 dev-cli:
@@ -302,6 +359,13 @@ deploy-user: build-cli
 		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
 		exit 1; \
 	fi
+	@if [ -f /tmp/iam-manager.env ]; then \
+		cp /tmp/iam-manager.env .env.prod; \
+		chmod 600 .env.prod; \
+		echo "✅ Credentials saved to .env.prod"; \
+	else \
+		echo "⚠️  Warning: /tmp/iam-manager.env not found, .env.prod not created"; \
+	fi
 
 # Remove IAM user and resources
 remove-user: build-cli
@@ -313,6 +377,10 @@ remove-user: build-cli
 	else \
 		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
 		exit 1; \
+	fi
+	@if [ -f .env.prod ]; then \
+		rm .env.prod; \
+		echo "✅ Removed .env.prod"; \
 	fi
 
 # Create IAM role for cross-account access
@@ -351,6 +419,60 @@ deploy-stackset: build-cli
 		exit 1; \
 	fi
 
+# Update existing StackSet with new template
+update-stackset:
+	@echo "🔄 Updating StackSet with new template..."
+	@if [ ! -f cloudformation/iam-manager-role.yaml ]; then \
+		echo "❌ Error: cloudformation/iam-manager-role.yaml not found"; \
+		exit 1; \
+	fi
+	@echo "📋 Template: cloudformation/iam-manager-role.yaml"
+	@echo "🔍 Checking StackSet exists..."
+	@aws cloudformation describe-stack-set --stack-set-name IAMManagerCrossAccountRole >/dev/null 2>&1 || \
+		(echo "❌ Error: StackSet 'IAMManagerCrossAccountRole' not found. Run 'make deploy-stackset' first."; exit 1)
+	@echo "📤 Updating StackSet..."
+	@aws cloudformation update-stack-set \
+		--stack-set-name IAMManagerCrossAccountRole \
+		--template-body file://cloudformation/iam-manager-role.yaml \
+		--capabilities CAPABILITY_NAMED_IAM \
+		--operation-preferences FailureToleranceCount=0,MaxConcurrentPercentage=100 \
+		--output text > /tmp/stackset-operation-id.txt || \
+		(echo "⚠️  No updates to perform or update failed"; exit 0)
+	@if [ -s /tmp/stackset-operation-id.txt ]; then \
+		OPERATION_ID=$$(cat /tmp/stackset-operation-id.txt); \
+		echo "✅ StackSet update initiated"; \
+		echo "📊 Operation ID: $$OPERATION_ID"; \
+		echo ""; \
+		echo "⏳ Waiting for update to complete across all accounts..."; \
+		echo "💡 This may take several minutes depending on the number of accounts"; \
+		echo ""; \
+		while true; do \
+			STATUS=$$(aws cloudformation describe-stack-set-operation \
+				--stack-set-name IAMManagerCrossAccountRole \
+				--operation-id $$OPERATION_ID \
+				--query 'StackSetOperation.Status' \
+				--output text 2>/dev/null || echo "UNKNOWN"); \
+			if [ "$$STATUS" = "SUCCEEDED" ]; then \
+				echo "✅ StackSet update completed successfully!"; \
+				break; \
+			elif [ "$$STATUS" = "FAILED" ] || [ "$$STATUS" = "STOPPED" ]; then \
+				echo "❌ StackSet update failed with status: $$STATUS"; \
+				echo "🔍 Check details with: make status-stackset"; \
+				exit 1; \
+			elif [ "$$STATUS" = "RUNNING" ]; then \
+				echo "⏳ Update in progress... (Status: $$STATUS)"; \
+				sleep 10; \
+			else \
+				echo "⚠️  Unknown status: $$STATUS"; \
+				sleep 10; \
+			fi; \
+		done; \
+		echo ""; \
+		echo "🎉 All account stacks updated with new IAM permissions"; \
+		echo "📊 Check status with: make status-stackset"; \
+	fi
+	@rm -f /tmp/stackset-operation-id.txt
+
 # Show StackSet deployment status
 status-stackset: build-cli
 	@echo "📊 Checking StackSet deployment status..."
@@ -363,9 +485,9 @@ status-stackset: build-cli
 		exit 1; \
 	fi
 
-# Delete StackSet and all instances
-delete-stackset: build-cli
-	@echo "🗑️  Deleting StackSet and all instances..."
+# Remove StackSet and all instances
+remove-stackset: build-cli
+	@echo "🗑️  Removing StackSet and all instances..."
 	@if [ -f bin/iam-manager ]; then \
 		./bin/iam-manager stackset-delete; \
 	elif command -v go >/dev/null 2>&1; then \
@@ -374,6 +496,9 @@ delete-stackset: build-cli
 		echo "❌ Error: Neither binary nor Go found. Run 'make build-cli' first."; \
 		exit 1; \
 	fi
+
+# Delete StackSet (alias for remove-stackset)
+delete-stackset: remove-stackset
 
 # Show current deployment status
 cli-status: build-cli
@@ -574,6 +699,17 @@ docker-build-multiarch-push: build-frontend
 docker-push-ghcr: docker-build-ghcr
 	@echo "📤 Pushing Docker image to GHCR..."
 	docker push ghcr.io/rusik69/aws-iam-manager:latest
+
+# Run Docker container locally
+docker-run:
+	@echo "🐳 Running Docker container locally..."
+	docker run -d -p 8080:8080 --name aws-iam-manager \
+		--env-file .env.prod \
+		aws-iam-manager:latest
+	@echo "✅ Container started successfully"
+	@echo "📍 Application available at: http://localhost:8080"
+	@echo "💡 To stop: docker stop aws-iam-manager"
+	@echo "💡 To remove: docker rm aws-iam-manager"
 
 # Validate GitHub Actions workflows
 validate-workflows:

@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/elbv2"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/organizations"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sts"
 )
 
@@ -109,18 +111,29 @@ type AWSService struct {
 }
 
 func NewAWSService(cfg config.Config) *AWSService {
-	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
-	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	region := os.Getenv("AWS_REGION")
-
 	if region == "" {
 		region = "us-east-1"
 	}
 
-	sess, err := session.NewSession(&aws.Config{
-		Region:      aws.String(region),
-		Credentials: credentials.NewStaticCredentials(accessKey, secretKey, ""),
-	})
+	// Create AWS config
+	awsConfig := &aws.Config{
+		Region: aws.String(region),
+	}
+
+	// Only use static credentials if both access key and secret key are provided
+	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	sessionToken := os.Getenv("AWS_SESSION_TOKEN")
+
+	if accessKey != "" && secretKey != "" {
+		// Use static credentials
+		// Note: Pass empty string for session token if not set - the SDK handles this correctly
+		awsConfig.Credentials = credentials.NewStaticCredentials(accessKey, secretKey, sessionToken)
+	}
+	// Otherwise, let the SDK use the default credential chain
+
+	sess, err := session.NewSession(awsConfig)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create AWS session: %v", err))
 	}
@@ -307,6 +320,98 @@ func (s *AWSService) ListUsers(accountID string) ([]models.User, error) {
 	s.cache.Set(cacheKey, users, s.cacheTTL)
 	
 	return users, nil
+}
+
+// ListAllUsers returns all users from all accessible accounts in parallel
+func (s *AWSService) ListAllUsers() ([]models.UserWithAccount, error) {
+	const cacheKey = "all-users"
+	
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if users, ok := cached.([]models.UserWithAccount); ok {
+			return users, nil
+		}
+	}
+
+	accounts, err := s.ListAccounts()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list accounts: %v", err)
+	}
+
+	// Filter accessible accounts
+	var accessibleAccounts []models.Account
+	for _, account := range accounts {
+		if account.Accessible {
+			accessibleAccounts = append(accessibleAccounts, account)
+		}
+	}
+
+	if len(accessibleAccounts) == 0 {
+		return []models.UserWithAccount{}, nil
+	}
+
+	// Channel to collect results from goroutines
+	type accountResult struct {
+		users     []models.UserWithAccount
+		err       error
+		accountID string
+	}
+
+	resultChan := make(chan accountResult, len(accessibleAccounts))
+	var wg sync.WaitGroup
+
+	// Process each account in parallel
+	for _, account := range accessibleAccounts {
+		wg.Add(1)
+		go func(acc models.Account) {
+			defer wg.Done()
+			
+			users, err := s.ListUsers(acc.ID)
+			if err != nil {
+				resultChan <- accountResult{
+					err:       err,
+					accountID: acc.ID,
+				}
+				return
+			}
+
+			// Convert to UserWithAccount
+			var usersWithAccount []models.UserWithAccount
+			for _, user := range users {
+				usersWithAccount = append(usersWithAccount, models.UserWithAccount{
+					User:        user,
+					AccountID:   acc.ID,
+					AccountName: acc.Name,
+				})
+			}
+
+			resultChan <- accountResult{
+				users:     usersWithAccount,
+				accountID: acc.ID,
+			}
+		}(account)
+	}
+
+	// Wait for all goroutines to complete and close channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var allUsers []models.UserWithAccount
+	for result := range resultChan {
+		if result.err != nil {
+			fmt.Printf("[WARNING] Failed to get users for account %s: %v\n", result.accountID, result.err)
+			continue
+		}
+		allUsers = append(allUsers, result.users...)
+	}
+
+	// Cache the result
+	s.cache.Set(cacheKey, allUsers, s.cacheTTL)
+
+	return allUsers, nil
 }
 
 func (s *AWSService) GetUser(accountID, username string) (*models.User, error) {
@@ -511,6 +616,122 @@ func (s *AWSService) DeleteUser(accountID, username string) error {
 		}
 	}
 
+	// Detach all managed policies from the user
+	attachedPolicies, err := iamClient.ListAttachedUserPolicies(&iam.ListAttachedUserPoliciesInput{
+		UserName: aws.String(username),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list attached policies: %v", err)
+	}
+
+	for _, policy := range attachedPolicies.AttachedPolicies {
+		_, err = iamClient.DetachUserPolicy(&iam.DetachUserPolicyInput{
+			UserName:  aws.String(username),
+			PolicyArn: policy.PolicyArn,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to detach policy %s: %v", *policy.PolicyName, err)
+		}
+	}
+
+	// Delete all inline policies from the user
+	inlinePolicies, err := iamClient.ListUserPolicies(&iam.ListUserPoliciesInput{
+		UserName: aws.String(username),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list inline policies: %v", err)
+	}
+
+	for _, policyName := range inlinePolicies.PolicyNames {
+		_, err = iamClient.DeleteUserPolicy(&iam.DeleteUserPolicyInput{
+			UserName:   aws.String(username),
+			PolicyName: policyName,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete inline policy %s: %v", *policyName, err)
+		}
+	}
+
+	// Deactivate and delete all MFA devices
+	mfaDevices, err := iamClient.ListMFADevices(&iam.ListMFADevicesInput{
+		UserName: aws.String(username),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list MFA devices: %v", err)
+	}
+
+	for _, device := range mfaDevices.MFADevices {
+		// Deactivate the MFA device first
+		_, err = iamClient.DeactivateMFADevice(&iam.DeactivateMFADeviceInput{
+			UserName:     aws.String(username),
+			SerialNumber: device.SerialNumber,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to deactivate MFA device %s: %v", *device.SerialNumber, err)
+		}
+		// Delete virtual MFA device if it's a virtual one (ARN contains "mfa/")
+		if device.SerialNumber != nil && strings.Contains(*device.SerialNumber, ":mfa/") {
+			_, _ = iamClient.DeleteVirtualMFADevice(&iam.DeleteVirtualMFADeviceInput{
+				SerialNumber: device.SerialNumber,
+			})
+			// Ignore errors for virtual MFA deletion as it may not be virtual
+		}
+	}
+
+	// Delete all SSH public keys
+	sshKeys, err := iamClient.ListSSHPublicKeys(&iam.ListSSHPublicKeysInput{
+		UserName: aws.String(username),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list SSH public keys: %v", err)
+	}
+
+	for _, sshKey := range sshKeys.SSHPublicKeys {
+		_, err = iamClient.DeleteSSHPublicKey(&iam.DeleteSSHPublicKeyInput{
+			UserName:       aws.String(username),
+			SSHPublicKeyId: sshKey.SSHPublicKeyId,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete SSH public key %s: %v", *sshKey.SSHPublicKeyId, err)
+		}
+	}
+
+	// Delete all signing certificates
+	signingCerts, err := iamClient.ListSigningCertificates(&iam.ListSigningCertificatesInput{
+		UserName: aws.String(username),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list signing certificates: %v", err)
+	}
+
+	for _, cert := range signingCerts.Certificates {
+		_, err = iamClient.DeleteSigningCertificate(&iam.DeleteSigningCertificateInput{
+			UserName:      aws.String(username),
+			CertificateId: cert.CertificateId,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete signing certificate %s: %v", *cert.CertificateId, err)
+		}
+	}
+
+	// Delete all service-specific credentials
+	serviceCredentials, err := iamClient.ListServiceSpecificCredentials(&iam.ListServiceSpecificCredentialsInput{
+		UserName: aws.String(username),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list service-specific credentials: %v", err)
+	}
+
+	for _, cred := range serviceCredentials.ServiceSpecificCredentials {
+		_, err = iamClient.DeleteServiceSpecificCredential(&iam.DeleteServiceSpecificCredentialInput{
+			UserName:                    aws.String(username),
+			ServiceSpecificCredentialId: cred.ServiceSpecificCredentialId,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete service-specific credential %s: %v", *cred.ServiceSpecificCredentialId, err)
+		}
+	}
+
 	// Delete the login profile if it exists
 	_, err = iamClient.DeleteLoginProfile(&iam.DeleteLoginProfileInput{
 		UserName: aws.String(username),
@@ -525,11 +746,37 @@ func (s *AWSService) DeleteUser(accountID, username string) error {
 		return fmt.Errorf("failed to delete user: %v", err)
 	}
 
-	// Invalidate related cache entries
+	// Update the users cache by removing the deleted user instead of invalidating
+	cacheKey := fmt.Sprintf("users:%s", accountID)
+	if cached, found := s.cache.Get(cacheKey); found {
+		if users, ok := cached.([]models.User); ok {
+			// Filter out the deleted user
+			var updatedUsers []models.User
+			for _, user := range users {
+				if user.Username != username {
+					updatedUsers = append(updatedUsers, user)
+				}
+			}
+			// Update the cache with the filtered list
+			s.cache.Set(cacheKey, updatedUsers, s.cacheTTL)
+		}
+	}
+	
+	// Also update the all-users cache
+	if cached, found := s.cache.Get("all-users"); found {
+		if allUsers, ok := cached.([]models.UserWithAccount); ok {
+			var updatedAllUsers []models.UserWithAccount
+			for _, user := range allUsers {
+				if !(user.AccountID == accountID && user.Username == username) {
+					updatedAllUsers = append(updatedAllUsers, user)
+				}
+			}
+			s.cache.Set("all-users", updatedAllUsers, s.cacheTTL)
+		}
+	}
+	
+	// Delete the individual user cache entry
 	s.cache.Delete(fmt.Sprintf("user:%s:%s", accountID, username))
-	s.cache.Delete(fmt.Sprintf("users:%s", accountID))
-	// Also invalidate accounts cache in case it includes user/key counts
-	s.cache.Delete("accounts")
 
 	return nil
 }
@@ -623,12 +870,23 @@ func (s *AWSService) InvalidateAccountCache(accountID string) {
 	s.cache.Delete("accounts")
 }
 
-// InvalidateUserCache invalidates cache entries for a specific user
+// InvalidateUserCache removes a specific user from the cache without invalidating the entire account cache
 func (s *AWSService) InvalidateUserCache(accountID, username string) {
+	// Update the users cache by removing the specific user
+	cacheKey := fmt.Sprintf("users:%s", accountID)
+	if cached, found := s.cache.Get(cacheKey); found {
+		if users, ok := cached.([]models.User); ok {
+			var updatedUsers []models.User
+			for _, user := range users {
+				if user.Username != username {
+					updatedUsers = append(updatedUsers, user)
+				}
+			}
+			s.cache.Set(cacheKey, updatedUsers, s.cacheTTL)
+		}
+	}
+	// Delete the individual user cache entry
 	s.cache.Delete(fmt.Sprintf("user:%s:%s", accountID, username))
-	s.cache.Delete(fmt.Sprintf("users:%s", accountID))
-	// Also invalidate accounts cache in case it includes user/key counts
-	s.cache.Delete("accounts")
 }
 
 // InvalidatePublicIPsCache invalidates the public IPs cache
@@ -1691,6 +1949,864 @@ func (s *AWSService) DeleteSecurityGroup(accountID, region, groupID string) erro
 	return nil
 }
 
+// ============================================================================
+// SNAPSHOT MANAGEMENT
+// ============================================================================
+
+// ListSnapshots returns all EBS snapshots from all accessible accounts
+func (s *AWSService) ListSnapshots() ([]models.Snapshot, error) {
+	const cacheKey = "snapshots"
+
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if snapshots, ok := cached.([]models.Snapshot); ok {
+			return snapshots, nil
+		}
+	}
+
+	accounts, err := s.ListAccounts()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list accounts: %v", err)
+	}
+
+	// Filter accessible accounts
+	var accessibleAccounts []models.Account
+	for _, account := range accounts {
+		if account.Accessible {
+			accessibleAccounts = append(accessibleAccounts, account)
+		}
+	}
+
+	if len(accessibleAccounts) == 0 {
+		return []models.Snapshot{}, nil
+	}
+
+	// Channel to collect results from goroutines
+	type accountResult struct {
+		snapshots []models.Snapshot
+		err       error
+		accountID string
+	}
+
+	resultChan := make(chan accountResult, len(accessibleAccounts))
+	var wg sync.WaitGroup
+
+	// Process each account in parallel
+	for _, account := range accessibleAccounts {
+		wg.Add(1)
+		go func(acc models.Account) {
+			defer wg.Done()
+
+			snapshots, err := s.ListSnapshotsByAccount(acc.ID)
+			resultChan <- accountResult{
+				snapshots: snapshots,
+				err:       err,
+				accountID: acc.ID,
+			}
+		}(account)
+	}
+
+	// Wait for all goroutines to complete and close channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var allSnapshots []models.Snapshot
+	for result := range resultChan {
+		if result.err != nil {
+			fmt.Printf("[WARNING] Failed to get snapshots for account %s: %v\n", result.accountID, result.err)
+			continue
+		}
+		allSnapshots = append(allSnapshots, result.snapshots...)
+	}
+
+	// Cache the result
+	s.cache.Set(cacheKey, allSnapshots, s.cacheTTL)
+
+	return allSnapshots, nil
+}
+
+// ListSnapshotsByAccount returns all EBS snapshots for a specific account
+func (s *AWSService) ListSnapshotsByAccount(accountID string) ([]models.Snapshot, error) {
+	cacheKey := fmt.Sprintf("snapshots:%s", accountID)
+
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if snapshots, ok := cached.([]models.Snapshot); ok {
+			return snapshots, nil
+		}
+	}
+
+	sess, err := s.getSessionForAccount(accountID)
+	if err != nil {
+		fmt.Printf("[WARNING] Cannot access account %s, skipping snapshot listing: %v\n", accountID, err)
+		return []models.Snapshot{}, nil
+	}
+
+	// Get account name
+	accounts, _ := s.ListAccounts()
+	accountName := accountID
+	for _, acc := range accounts {
+		if acc.ID == accountID {
+			accountName = acc.Name
+			break
+		}
+	}
+
+	// Get all regions
+	regions := []string{
+		"us-east-1", "us-east-2", "us-west-1", "us-west-2",
+		"eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-north-1",
+		"ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2", "ap-south-1",
+		"sa-east-1", "ca-central-1",
+	}
+
+	var allSnapshots []models.Snapshot
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// Process each region in parallel
+	for _, region := range regions {
+		wg.Add(1)
+		go func(r string) {
+			defer wg.Done()
+
+			regionSess := sess.Copy(&aws.Config{Region: aws.String(r)})
+			ec2Client := ec2.New(regionSess)
+
+			// List snapshots owned by this account
+			input := &ec2.DescribeSnapshotsInput{
+				OwnerIds: []*string{aws.String(accountID)},
+			}
+
+			result, err := ec2Client.DescribeSnapshots(input)
+			if err != nil {
+				fmt.Printf("[WARNING] Failed to list snapshots in %s for account %s: %v\n", r, accountID, err)
+				return
+			}
+
+			var regionSnapshots []models.Snapshot
+			for _, snap := range result.Snapshots {
+				snapshot := models.Snapshot{
+					SnapshotID:  aws.StringValue(snap.SnapshotId),
+					VolumeID:    aws.StringValue(snap.VolumeId),
+					VolumeSize:  aws.Int64Value(snap.VolumeSize),
+					Description: aws.StringValue(snap.Description),
+					State:       aws.StringValue(snap.State),
+					Progress:    aws.StringValue(snap.Progress),
+					OwnerID:     aws.StringValue(snap.OwnerId),
+					Encrypted:   aws.BoolValue(snap.Encrypted),
+					AccountID:   accountID,
+					AccountName: accountName,
+					Region:      r,
+				}
+
+				if snap.StartTime != nil {
+					snapshot.StartTime = *snap.StartTime
+				}
+
+				// Convert tags
+				for _, tag := range snap.Tags {
+					snapshot.Tags = append(snapshot.Tags, models.Tag{
+						Key:   aws.StringValue(tag.Key),
+						Value: aws.StringValue(tag.Value),
+					})
+				}
+
+				regionSnapshots = append(regionSnapshots, snapshot)
+			}
+
+			mu.Lock()
+			allSnapshots = append(allSnapshots, regionSnapshots...)
+			mu.Unlock()
+		}(region)
+	}
+
+	wg.Wait()
+
+	// Cache the result
+	s.cache.Set(cacheKey, allSnapshots, s.cacheTTL)
+
+	return allSnapshots, nil
+}
+
+// DeleteSnapshot deletes an EBS snapshot
+func (s *AWSService) DeleteSnapshot(accountID, region, snapshotID string) error {
+	sess, err := s.getSessionForAccount(accountID)
+	if err != nil {
+		return fmt.Errorf("cannot access account %s: %w", accountID, err)
+	}
+
+	regionSess := sess.Copy(&aws.Config{Region: aws.String(region)})
+	ec2Client := ec2.New(regionSess)
+
+	_, err = ec2Client.DeleteSnapshot(&ec2.DeleteSnapshotInput{
+		SnapshotId: aws.String(snapshotID),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete snapshot %s: %v", snapshotID, err)
+	}
+
+	// Update cache - remove the deleted snapshot
+	s.updateSnapshotCache(accountID, snapshotID)
+
+	return nil
+}
+
+// updateSnapshotCache removes a deleted snapshot from the cache
+func (s *AWSService) updateSnapshotCache(accountID, snapshotID string) {
+	// Update account-specific cache
+	cacheKey := fmt.Sprintf("snapshots:%s", accountID)
+	if cached, found := s.cache.Get(cacheKey); found {
+		if snapshots, ok := cached.([]models.Snapshot); ok {
+			var updated []models.Snapshot
+			for _, snap := range snapshots {
+				if snap.SnapshotID != snapshotID {
+					updated = append(updated, snap)
+				}
+			}
+			s.cache.Set(cacheKey, updated, s.cacheTTL)
+		}
+	}
+
+	// Update global cache
+	if cached, found := s.cache.Get("snapshots"); found {
+		if snapshots, ok := cached.([]models.Snapshot); ok {
+			var updated []models.Snapshot
+			for _, snap := range snapshots {
+				if snap.SnapshotID != snapshotID {
+					updated = append(updated, snap)
+				}
+			}
+			s.cache.Set("snapshots", updated, s.cacheTTL)
+		}
+	}
+}
+
+// InvalidateSnapshotsCache invalidates the snapshots cache
+func (s *AWSService) InvalidateSnapshotsCache() {
+	s.cache.Delete("snapshots")
+	s.cache.DeletePattern("snapshots:")
+}
+
+// ListEC2Instances returns all EC2 instances from all accessible accounts
+func (s *AWSService) ListEC2Instances() ([]models.EC2Instance, error) {
+	const cacheKey = "ec2-instances"
+
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if instances, ok := cached.([]models.EC2Instance); ok {
+			return instances, nil
+		}
+	}
+
+	accounts, err := s.ListAccounts()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list accounts: %v", err)
+	}
+
+	// Filter accessible accounts
+	var accessibleAccounts []models.Account
+	for _, account := range accounts {
+		if account.Accessible {
+			accessibleAccounts = append(accessibleAccounts, account)
+		}
+	}
+
+	if len(accessibleAccounts) == 0 {
+		return []models.EC2Instance{}, nil
+	}
+
+	// Channel to collect results from goroutines
+	type accountResult struct {
+		instances []models.EC2Instance
+		err       error
+		accountID string
+	}
+
+	resultChan := make(chan accountResult, len(accessibleAccounts))
+	var wg sync.WaitGroup
+
+	// Process each account in parallel
+	for _, account := range accessibleAccounts {
+		wg.Add(1)
+		go func(acc models.Account) {
+			defer wg.Done()
+
+			instances, err := s.getEC2InstancesForAccount(acc)
+			resultChan <- accountResult{
+				instances: instances,
+				err:       err,
+				accountID: acc.ID,
+			}
+		}(account)
+	}
+
+	// Wait for all goroutines to complete and close channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var allInstances []models.EC2Instance
+	for result := range resultChan {
+		if result.err != nil {
+			fmt.Printf("[WARNING] Failed to get EC2 instances for account %s: %v\n", result.accountID, result.err)
+			continue
+		}
+		allInstances = append(allInstances, result.instances...)
+	}
+
+	// Cache the result
+	s.cache.Set(cacheKey, allInstances, s.cacheTTL)
+
+	return allInstances, nil
+}
+
+// getEC2InstancesForAccount returns all EC2 instances for a specific account across all regions
+func (s *AWSService) getEC2InstancesForAccount(account models.Account) ([]models.EC2Instance, error) {
+	sess, err := s.getSessionForAccount(account.ID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot access account %s: %w", account.ID, err)
+	}
+
+	// Get all regions
+	ec2Client := ec2.New(sess)
+	regionsResult, err := ec2Client.DescribeRegions(&ec2.DescribeRegionsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe regions: %v", err)
+	}
+
+	if len(regionsResult.Regions) == 0 {
+		return []models.EC2Instance{}, nil
+	}
+
+	// Channel to collect results from region goroutines
+	type regionResult struct {
+		instances  []models.EC2Instance
+		regionName string
+	}
+
+	resultChan := make(chan regionResult, len(regionsResult.Regions))
+	var wg sync.WaitGroup
+
+	// Process each region in parallel
+	for _, region := range regionsResult.Regions {
+		wg.Add(1)
+		go func(regionName string) {
+			defer wg.Done()
+
+			// Create session for this region
+			regionSess := sess.Copy(&aws.Config{Region: aws.String(regionName)})
+			regionInstances, err := s.getEC2InstancesForRegion(regionSess, account, regionName)
+			if err != nil {
+				fmt.Printf("[WARNING] Failed to get instances in region %s for account %s: %v\n", regionName, account.ID, err)
+				regionInstances = []models.EC2Instance{}
+			}
+
+			resultChan <- regionResult{
+				instances:  regionInstances,
+				regionName: regionName,
+			}
+		}(*region.RegionName)
+	}
+
+	// Wait for all goroutines to complete and close channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var allInstances []models.EC2Instance
+	for result := range resultChan {
+		allInstances = append(allInstances, result.instances...)
+	}
+
+	return allInstances, nil
+}
+
+// getEC2InstancesForRegion returns all EC2 instances for a specific region
+func (s *AWSService) getEC2InstancesForRegion(sess *session.Session, account models.Account, region string) ([]models.EC2Instance, error) {
+	ec2Client := ec2.New(sess)
+	var instances []models.EC2Instance
+	var nextToken *string
+
+	// Paginate through all instances (handle large instance counts)
+	for {
+		input := &ec2.DescribeInstancesInput{}
+		if nextToken != nil {
+			input.NextToken = nextToken
+		}
+
+		result, err := ec2Client.DescribeInstances(input)
+		if err != nil {
+			return nil, err
+		}
+
+		// Process instances from this page
+		for _, reservation := range result.Reservations {
+			for _, instance := range reservation.Instances {
+				// Extract instance name from tags
+				instanceName := ""
+				for _, tag := range instance.Tags {
+					if *tag.Key == "Name" {
+						instanceName = *tag.Value
+						break
+					}
+				}
+
+				// Convert tags
+				var tags []models.Tag
+				for _, tag := range instance.Tags {
+					tags = append(tags, models.Tag{
+						Key:   aws.StringValue(tag.Key),
+						Value: aws.StringValue(tag.Value),
+					})
+				}
+
+				ec2Instance := models.EC2Instance{
+					InstanceID:   aws.StringValue(instance.InstanceId),
+					Name:         instanceName,
+					AccountID:    account.ID,
+					AccountName:  account.Name,
+					Region:       region,
+					InstanceType: aws.StringValue(instance.InstanceType),
+					State:        aws.StringValue(instance.State.Name),
+					Tags:         tags,
+				}
+
+				if instance.LaunchTime != nil {
+					ec2Instance.LaunchTime = *instance.LaunchTime
+				}
+
+				instances = append(instances, ec2Instance)
+			}
+		}
+
+		// Check if there are more pages
+		if result.NextToken == nil {
+			break
+		}
+		nextToken = result.NextToken
+	}
+
+	return instances, nil
+}
+
+// InvalidateEC2InstancesCache invalidates the EC2 instances cache
+func (s *AWSService) InvalidateEC2InstancesCache() {
+	s.cache.Delete("ec2-instances")
+}
+
+// updateEC2InstanceStateInCache updates a specific instance's state in the cache
+func (s *AWSService) updateEC2InstanceStateInCache(instanceID, newState string) {
+	const cacheKey = "ec2-instances"
+
+	if cached, found := s.cache.Get(cacheKey); found {
+		if instances, ok := cached.([]models.EC2Instance); ok {
+			// Update the specific instance's state
+			for i := range instances {
+				if instances[i].InstanceID == instanceID {
+					instances[i].State = newState
+					break
+				}
+			}
+			// Update the cache with the modified list
+			s.cache.Set(cacheKey, instances, s.cacheTTL)
+		}
+	}
+}
+
+// StopEC2Instance stops an EC2 instance
+func (s *AWSService) StopEC2Instance(accountID, region, instanceID string) error {
+	sess, err := s.getSessionForAccount(accountID)
+	if err != nil {
+		return fmt.Errorf("cannot access account %s: %w", accountID, err)
+	}
+
+	// Create session for the specific region
+	regionSess := sess.Copy(&aws.Config{Region: aws.String(region)})
+	ec2Client := ec2.New(regionSess)
+
+	// Stop the instance
+	_, err = ec2Client.StopInstances(&ec2.StopInstancesInput{
+		InstanceIds: []*string{aws.String(instanceID)},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to stop instance %s: %v", instanceID, err)
+	}
+
+	// Update the instance state in cache instead of invalidating
+	s.updateEC2InstanceStateInCache(instanceID, "stopping")
+
+	return nil
+}
+
+// TerminateEC2Instance terminates an EC2 instance
+func (s *AWSService) TerminateEC2Instance(accountID, region, instanceID string) error {
+	sess, err := s.getSessionForAccount(accountID)
+	if err != nil {
+		return fmt.Errorf("cannot access account %s: %w", accountID, err)
+	}
+
+	// Create session for the specific region
+	regionSess := sess.Copy(&aws.Config{Region: aws.String(region)})
+	ec2Client := ec2.New(regionSess)
+
+	// Terminate the instance
+	_, err = ec2Client.TerminateInstances(&ec2.TerminateInstancesInput{
+		InstanceIds: []*string{aws.String(instanceID)},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to terminate instance %s: %v", instanceID, err)
+	}
+
+	// Update the instance state in cache instead of invalidating
+	s.updateEC2InstanceStateInCache(instanceID, "terminating")
+
+	return nil
+}
+
+// ============================================================================
+// EBS VOLUME MANAGEMENT
+// ============================================================================
+
+// ListEBSVolumes returns all EBS volumes from all accessible accounts
+func (s *AWSService) ListEBSVolumes() ([]models.EBSVolume, error) {
+	const cacheKey = "ebs-volumes"
+
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if volumes, ok := cached.([]models.EBSVolume); ok {
+			return volumes, nil
+		}
+	}
+
+	accounts, err := s.ListAccounts()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list accounts: %v", err)
+	}
+
+	// Filter accessible accounts
+	var accessibleAccounts []models.Account
+	for _, account := range accounts {
+		if account.Accessible {
+			accessibleAccounts = append(accessibleAccounts, account)
+		}
+	}
+
+	if len(accessibleAccounts) == 0 {
+		return []models.EBSVolume{}, nil
+	}
+
+	// Channel to collect results from goroutines
+	type accountResult struct {
+		volumes   []models.EBSVolume
+		err       error
+		accountID string
+	}
+
+	resultChan := make(chan accountResult, len(accessibleAccounts))
+	var wg sync.WaitGroup
+
+	// Process each account in parallel
+	for _, account := range accessibleAccounts {
+		wg.Add(1)
+		go func(acc models.Account) {
+			defer wg.Done()
+
+			volumes, err := s.ListEBSVolumesByAccount(acc.ID)
+			resultChan <- accountResult{
+				volumes:   volumes,
+				err:       err,
+				accountID: acc.ID,
+			}
+		}(account)
+	}
+
+	// Wait for all goroutines to complete and close channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var allVolumes []models.EBSVolume
+	for result := range resultChan {
+		if result.err != nil {
+			fmt.Printf("[WARNING] Failed to get volumes for account %s: %v\n", result.accountID, result.err)
+			continue
+		}
+		allVolumes = append(allVolumes, result.volumes...)
+	}
+
+	// Cache the result
+	s.cache.Set(cacheKey, allVolumes, s.cacheTTL)
+
+	return allVolumes, nil
+}
+
+// ListEBSVolumesByAccount returns all EBS volumes for a specific account
+func (s *AWSService) ListEBSVolumesByAccount(accountID string) ([]models.EBSVolume, error) {
+	cacheKey := fmt.Sprintf("ebs-volumes:%s", accountID)
+
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if volumes, ok := cached.([]models.EBSVolume); ok {
+			return volumes, nil
+		}
+	}
+
+	sess, err := s.getSessionForAccount(accountID)
+	if err != nil {
+		fmt.Printf("[WARNING] Cannot access account %s, skipping volume listing: %v\n", accountID, err)
+		return []models.EBSVolume{}, nil
+	}
+
+	// Get account name
+	accounts, _ := s.ListAccounts()
+	accountName := accountID
+	for _, acc := range accounts {
+		if acc.ID == accountID {
+			accountName = acc.Name
+			break
+		}
+	}
+
+	// Get all regions
+	ec2Client := ec2.New(sess)
+	regionsResult, err := ec2Client.DescribeRegions(&ec2.DescribeRegionsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe regions: %v", err)
+	}
+
+	if len(regionsResult.Regions) == 0 {
+		return []models.EBSVolume{}, nil
+	}
+
+	var allVolumes []models.EBSVolume
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// Process each region in parallel
+	for _, region := range regionsResult.Regions {
+		wg.Add(1)
+		go func(r string) {
+			defer wg.Done()
+
+			regionSess := sess.Copy(&aws.Config{Region: aws.String(r)})
+			ec2Client := ec2.New(regionSess)
+
+			// List volumes in this region
+			input := &ec2.DescribeVolumesInput{}
+
+			result, err := ec2Client.DescribeVolumes(input)
+			if err != nil {
+				fmt.Printf("[WARNING] Failed to list volumes in %s for account %s: %v\n", r, accountID, err)
+				return
+			}
+
+			var regionVolumes []models.EBSVolume
+			for _, vol := range result.Volumes {
+				// Extract volume name from tags
+				volumeName := ""
+				for _, tag := range vol.Tags {
+					if *tag.Key == "Name" {
+						volumeName = *tag.Value
+						break
+					}
+				}
+
+				// Convert tags
+				var tags []models.Tag
+				for _, tag := range vol.Tags {
+					tags = append(tags, models.Tag{
+						Key:   aws.StringValue(tag.Key),
+						Value: aws.StringValue(tag.Value),
+					})
+				}
+
+				// Convert attachments
+				var attachments []models.VolumeAttachment
+				for _, att := range vol.Attachments {
+					attachment := models.VolumeAttachment{
+						InstanceID: aws.StringValue(att.InstanceId),
+						Device:     aws.StringValue(att.Device),
+						State:      aws.StringValue(att.State),
+					}
+					if att.AttachTime != nil {
+						attachment.AttachTime = *att.AttachTime
+					}
+					attachments = append(attachments, attachment)
+				}
+
+				volume := models.EBSVolume{
+					VolumeID:         aws.StringValue(vol.VolumeId),
+					Name:             volumeName,
+					AccountID:        accountID,
+					AccountName:      accountName,
+					Region:           r,
+					Size:             aws.Int64Value(vol.Size),
+					VolumeType:       aws.StringValue(vol.VolumeType),
+					State:            aws.StringValue(vol.State),
+					AvailabilityZone: aws.StringValue(vol.AvailabilityZone),
+					Encrypted:        aws.BoolValue(vol.Encrypted),
+					SnapshotID:       aws.StringValue(vol.SnapshotId),
+					Attachments:      attachments,
+					Tags:             tags,
+				}
+
+				if vol.CreateTime != nil {
+					volume.CreateTime = *vol.CreateTime
+				}
+				if vol.Iops != nil {
+					volume.IOPS = *vol.Iops
+				}
+				if vol.Throughput != nil {
+					volume.Throughput = *vol.Throughput
+				}
+
+				regionVolumes = append(regionVolumes, volume)
+			}
+
+			mu.Lock()
+			allVolumes = append(allVolumes, regionVolumes...)
+			mu.Unlock()
+		}(*region.RegionName)
+	}
+
+	wg.Wait()
+
+	// Cache the result
+	s.cache.Set(cacheKey, allVolumes, s.cacheTTL)
+
+	return allVolumes, nil
+}
+
+// DetachEBSVolume detaches an EBS volume from all instances
+func (s *AWSService) DetachEBSVolume(accountID, region, volumeID string) error {
+	sess, err := s.getSessionForAccount(accountID)
+	if err != nil {
+		return fmt.Errorf("cannot access account %s: %w", accountID, err)
+	}
+
+	regionSess := sess.Copy(&aws.Config{Region: aws.String(region)})
+	ec2Client := ec2.New(regionSess)
+
+	// Get volume details to find attachments
+	volResult, err := ec2Client.DescribeVolumes(&ec2.DescribeVolumesInput{
+		VolumeIds: []*string{aws.String(volumeID)},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to describe volume %s: %v", volumeID, err)
+	}
+
+	if len(volResult.Volumes) == 0 {
+		return fmt.Errorf("volume %s not found", volumeID)
+	}
+
+	vol := volResult.Volumes[0]
+	if len(vol.Attachments) == 0 {
+		return fmt.Errorf("volume %s is not attached to any instances", volumeID)
+	}
+
+	// Detach from all instances
+	for _, attachment := range vol.Attachments {
+		_, err = ec2Client.DetachVolume(&ec2.DetachVolumeInput{
+			VolumeId:   aws.String(volumeID),
+			InstanceId: attachment.InstanceId,
+			Device:     attachment.Device,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to detach volume %s from instance %s: %v", volumeID, *attachment.InstanceId, err)
+		}
+	}
+
+	// Invalidate cache to refresh volume state
+	s.InvalidateEBSVolumesCache()
+
+	return nil
+}
+
+func (s *AWSService) DeleteEBSVolume(accountID, region, volumeID string) error {
+	sess, err := s.getSessionForAccount(accountID)
+	if err != nil {
+		return fmt.Errorf("cannot access account %s: %w", accountID, err)
+	}
+
+	regionSess := sess.Copy(&aws.Config{Region: aws.String(region)})
+	ec2Client := ec2.New(regionSess)
+
+	// Check if the volume is in-use before attempting deletion
+	volResult, err := ec2Client.DescribeVolumes(&ec2.DescribeVolumesInput{
+		VolumeIds: []*string{aws.String(volumeID)},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to describe volume %s: %v", volumeID, err)
+	}
+
+	if len(volResult.Volumes) == 0 {
+		return fmt.Errorf("volume %s not found", volumeID)
+	}
+
+	vol := volResult.Volumes[0]
+	if len(vol.Attachments) > 0 {
+		return fmt.Errorf("volume %s is still attached to instance(s). Please detach first", volumeID)
+	}
+
+	_, err = ec2Client.DeleteVolume(&ec2.DeleteVolumeInput{
+		VolumeId: aws.String(volumeID),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete volume %s: %v", volumeID, err)
+	}
+
+	// Update cache - remove the deleted volume
+	s.updateEBSVolumeCache(accountID, volumeID)
+
+	return nil
+}
+
+// updateEBSVolumeCache removes a deleted volume from the cache
+func (s *AWSService) updateEBSVolumeCache(accountID, volumeID string) {
+	// Update account-specific cache
+	cacheKey := fmt.Sprintf("ebs-volumes:%s", accountID)
+	if cached, found := s.cache.Get(cacheKey); found {
+		if volumes, ok := cached.([]models.EBSVolume); ok {
+			var updated []models.EBSVolume
+			for _, vol := range volumes {
+				if vol.VolumeID != volumeID {
+					updated = append(updated, vol)
+				}
+			}
+			s.cache.Set(cacheKey, updated, s.cacheTTL)
+		}
+	}
+
+	// Update global cache
+	if cached, found := s.cache.Get("ebs-volumes"); found {
+		if volumes, ok := cached.([]models.EBSVolume); ok {
+			var updated []models.EBSVolume
+			for _, vol := range volumes {
+				if vol.VolumeID != volumeID {
+					updated = append(updated, vol)
+				}
+			}
+			s.cache.Set("ebs-volumes", updated, s.cacheTTL)
+		}
+	}
+}
+
+// InvalidateEBSVolumesCache invalidates the EBS volumes cache
+func (s *AWSService) InvalidateEBSVolumesCache() {
+	s.cache.Delete("ebs-volumes")
+	s.cache.DeletePattern("ebs-volumes:")
+}
+
 // getAccessKeysForUser retrieves access keys for a user with last used information
 func (s *AWSService) getAccessKeysForUser(iamClient *iam.IAM, userName *string) ([]models.AccessKey, error) {
 	keysResult, err := iamClient.ListAccessKeys(&iam.ListAccessKeysInput{
@@ -1728,5 +2844,360 @@ func (s *AWSService) getAccessKeysForUser(iamClient *iam.IAM, userName *string) 
 	}
 
 	return accessKeys, nil
+}
+
+// ListS3Buckets returns all S3 buckets across all accessible accounts
+func (s *AWSService) ListS3Buckets() ([]models.S3Bucket, error) {
+	const cacheKey = "s3-buckets"
+
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if buckets, ok := cached.([]models.S3Bucket); ok {
+			return buckets, nil
+		}
+	}
+
+	accounts, err := s.ListAccounts()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list accounts: %v", err)
+	}
+
+	// Filter accessible accounts
+	var accessibleAccounts []models.Account
+	for _, account := range accounts {
+		if account.Accessible {
+			accessibleAccounts = append(accessibleAccounts, account)
+		}
+	}
+
+	if len(accessibleAccounts) == 0 {
+		return []models.S3Bucket{}, nil
+	}
+
+	// Channel to collect results from goroutines
+	type accountResult struct {
+		buckets   []models.S3Bucket
+		err       error
+		accountID string
+	}
+
+	resultChan := make(chan accountResult, len(accessibleAccounts))
+	var wg sync.WaitGroup
+
+	// Process each account in parallel
+	for _, account := range accessibleAccounts {
+		wg.Add(1)
+		go func(acc models.Account) {
+			defer wg.Done()
+
+			buckets, err := s.getS3BucketsForAccount(acc)
+			resultChan <- accountResult{
+				buckets:   buckets,
+				err:       err,
+				accountID: acc.ID,
+			}
+		}(account)
+	}
+
+	// Wait for all goroutines to complete and close channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var allBuckets []models.S3Bucket
+	for result := range resultChan {
+		if result.err != nil {
+			fmt.Printf("[WARNING] Failed to get S3 buckets for account %s: %v\n", result.accountID, result.err)
+			continue
+		}
+		allBuckets = append(allBuckets, result.buckets...)
+	}
+
+	// Cache the result
+	s.cache.Set(cacheKey, allBuckets, s.cacheTTL)
+
+	return allBuckets, nil
+}
+
+// getS3BucketsForAccount returns all S3 buckets for a specific account
+func (s *AWSService) getS3BucketsForAccount(account models.Account) ([]models.S3Bucket, error) {
+	sess, err := s.getSessionForAccount(account.ID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot access account %s: %w", account.ID, err)
+	}
+
+	// S3 ListBuckets is global, but we need to use a specific region
+	// Use us-east-1 as the default region for listing buckets
+	s3Client := s3.New(sess.Copy(&aws.Config{Region: aws.String("us-east-1")}))
+
+	// List all buckets
+	bucketsResult, err := s3Client.ListBuckets(&s3.ListBucketsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list buckets: %v", err)
+	}
+
+	if len(bucketsResult.Buckets) == 0 {
+		return []models.S3Bucket{}, nil
+	}
+
+	// Channel to collect bucket details from goroutines
+	type bucketResult struct {
+		bucket models.S3Bucket
+		err    error
+	}
+
+	resultChan := make(chan bucketResult, len(bucketsResult.Buckets))
+	var wg sync.WaitGroup
+
+	// Get detailed information for each bucket in parallel
+	for _, bucket := range bucketsResult.Buckets {
+		wg.Add(1)
+		go func(bkt *s3.Bucket) {
+			defer wg.Done()
+
+			bucketDetail, err := s.getS3BucketDetails(sess, account, bkt)
+			if err != nil {
+				fmt.Printf("[WARNING] Failed to get details for bucket %s: %v\n", *bkt.Name, err)
+				resultChan <- bucketResult{err: err}
+				return
+			}
+
+			resultChan <- bucketResult{bucket: bucketDetail}
+		}(bucket)
+	}
+
+	// Wait for all goroutines to complete and close channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var buckets []models.S3Bucket
+	for result := range resultChan {
+		if result.err == nil {
+			buckets = append(buckets, result.bucket)
+		}
+	}
+
+	return buckets, nil
+}
+
+// getS3BucketDetails gets detailed information about a specific S3 bucket
+func (s *AWSService) getS3BucketDetails(sess *session.Session, account models.Account, bucket *s3.Bucket) (models.S3Bucket, error) {
+	bucketName := *bucket.Name
+
+	// Get bucket location
+	s3Client := s3.New(sess.Copy(&aws.Config{Region: aws.String("us-east-1")}))
+	locationResult, err := s3Client.GetBucketLocation(&s3.GetBucketLocationInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		return models.S3Bucket{}, fmt.Errorf("failed to get bucket location: %v", err)
+	}
+
+	region := "us-east-1"
+	if locationResult.LocationConstraint != nil && *locationResult.LocationConstraint != "" {
+		region = *locationResult.LocationConstraint
+	}
+
+	// Create a regional S3 client
+	regionalS3Client := s3.New(sess.Copy(&aws.Config{Region: aws.String(region)}))
+
+	bucketModel := models.S3Bucket{
+		Name:         bucketName,
+		AccountID:    account.ID,
+		AccountName:  account.Name,
+		Region:       region,
+		CreationDate: *bucket.CreationDate,
+	}
+
+	// Get versioning status
+	versioningResult, err := regionalS3Client.GetBucketVersioning(&s3.GetBucketVersioningInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err == nil && versioningResult.Status != nil {
+		bucketModel.Versioning = *versioningResult.Status
+	}
+
+	// Get encryption configuration
+	encryptionResult, err := regionalS3Client.GetBucketEncryption(&s3.GetBucketEncryptionInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err == nil && encryptionResult.ServerSideEncryptionConfiguration != nil {
+		bucketModel.Encrypted = true
+	}
+
+	// Get public access block configuration
+	publicAccessResult, err := regionalS3Client.GetPublicAccessBlock(&s3.GetPublicAccessBlockInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err == nil && publicAccessResult.PublicAccessBlockConfiguration != nil {
+		config := publicAccessResult.PublicAccessBlockConfiguration
+		bucketModel.PublicAccessBlocked = config.BlockPublicAcls != nil && *config.BlockPublicAcls &&
+			config.BlockPublicPolicy != nil && *config.BlockPublicPolicy &&
+			config.IgnorePublicAcls != nil && *config.IgnorePublicAcls &&
+			config.RestrictPublicBuckets != nil && *config.RestrictPublicBuckets
+	}
+
+	// Check if bucket is public by checking ACL and policy
+	bucketModel.IsPublic = !bucketModel.PublicAccessBlocked
+
+	// Get bucket tagging
+	tagsResult, err := regionalS3Client.GetBucketTagging(&s3.GetBucketTaggingInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err == nil && tagsResult.TagSet != nil {
+		for _, tag := range tagsResult.TagSet {
+			if tag.Key != nil && tag.Value != nil {
+				bucketModel.Tags = append(bucketModel.Tags, models.Tag{
+					Key:   *tag.Key,
+					Value: *tag.Value,
+				})
+			}
+		}
+	}
+
+	// Check for lifecycle policy
+	_, err = regionalS3Client.GetBucketLifecycleConfiguration(&s3.GetBucketLifecycleConfigurationInput{
+		Bucket: aws.String(bucketName),
+	})
+	bucketModel.HasLifecyclePolicy = err == nil
+
+	// Check for logging
+	loggingResult, err := regionalS3Client.GetBucketLogging(&s3.GetBucketLoggingInput{
+		Bucket: aws.String(bucketName),
+	})
+	bucketModel.HasLogging = err == nil && loggingResult.LoggingEnabled != nil
+
+	// Calculate bucket size and object count
+	size, count, err := s.calculateBucketSize(regionalS3Client, bucketName)
+	if err != nil {
+		fmt.Printf("[WARNING] Failed to calculate size for bucket %s: %v\n", bucketName, err)
+	} else {
+		bucketModel.Size = size
+		bucketModel.ObjectCount = count
+	}
+
+	return bucketModel, nil
+}
+
+// calculateBucketSize calculates the total size and object count for an S3 bucket
+func (s *AWSService) calculateBucketSize(s3Client *s3.S3, bucketName string) (int64, int64, error) {
+	var totalSize int64
+	var objectCount int64
+
+	// Use ListObjectsV2 to iterate through all objects
+	input := &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucketName),
+	}
+
+	err := s3Client.ListObjectsV2Pages(input, func(page *s3.ListObjectsV2Output, lastPage bool) bool {
+		for _, obj := range page.Contents {
+			if obj.Size != nil {
+				totalSize += *obj.Size
+			}
+			objectCount++
+		}
+		return true // Continue pagination
+	})
+
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to list objects: %v", err)
+	}
+
+	return totalSize, objectCount, nil
+}
+
+// ListS3BucketsByAccount returns all S3 buckets for a specific account
+func (s *AWSService) ListS3BucketsByAccount(accountID string) ([]models.S3Bucket, error) {
+	cacheKey := fmt.Sprintf("s3-buckets:%s", accountID)
+
+	// Check cache first
+	if cached, found := s.cache.Get(cacheKey); found {
+		if buckets, ok := cached.([]models.S3Bucket); ok {
+			return buckets, nil
+		}
+	}
+
+	// Get all buckets and filter by account
+	allBuckets, err := s.ListS3Buckets()
+	if err != nil {
+		return nil, err
+	}
+
+	var accountBuckets []models.S3Bucket
+	for _, bucket := range allBuckets {
+		if bucket.AccountID == accountID {
+			accountBuckets = append(accountBuckets, bucket)
+		}
+	}
+
+	// Cache the result
+	s.cache.Set(cacheKey, accountBuckets, s.cacheTTL)
+
+	return accountBuckets, nil
+}
+
+// DeleteS3Bucket deletes an S3 bucket (bucket must be empty)
+func (s *AWSService) DeleteS3Bucket(accountID, region, bucketName string) error {
+	sess, err := s.getSessionForAccount(accountID)
+	if err != nil {
+		return fmt.Errorf("cannot access account %s: %w", accountID, err)
+	}
+
+	regionSess := sess.Copy(&aws.Config{Region: aws.String(region)})
+	s3Client := s3.New(regionSess)
+
+	// Try to delete the bucket
+	_, err = s3Client.DeleteBucket(&s3.DeleteBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete bucket %s: %v (bucket must be empty)", bucketName, err)
+	}
+
+	// Update cache - remove the deleted bucket
+	s.updateS3BucketCache(accountID, bucketName)
+
+	return nil
+}
+
+// updateS3BucketCache removes a deleted bucket from the cache
+func (s *AWSService) updateS3BucketCache(accountID, bucketName string) {
+	// Update account-specific cache
+	cacheKey := fmt.Sprintf("s3-buckets:%s", accountID)
+	if cached, found := s.cache.Get(cacheKey); found {
+		if buckets, ok := cached.([]models.S3Bucket); ok {
+			var updated []models.S3Bucket
+			for _, bucket := range buckets {
+				if bucket.Name != bucketName {
+					updated = append(updated, bucket)
+				}
+			}
+			s.cache.Set(cacheKey, updated, s.cacheTTL)
+		}
+	}
+
+	// Update global cache
+	if cached, found := s.cache.Get("s3-buckets"); found {
+		if buckets, ok := cached.([]models.S3Bucket); ok {
+			var updated []models.S3Bucket
+			for _, bucket := range buckets {
+				if bucket.Name != bucketName {
+					updated = append(updated, bucket)
+				}
+			}
+			s.cache.Set("s3-buckets", updated, s.cacheTTL)
+		}
+	}
+}
+
+// InvalidateS3BucketsCache invalidates the S3 buckets cache
+func (s *AWSService) InvalidateS3BucketsCache() {
+	s.cache.Delete("s3-buckets")
+	s.cache.DeletePattern("s3-buckets:")
 }
 

@@ -7,9 +7,10 @@ COPY frontend/ ./
 RUN npm run build
 
 # Build backend
-FROM golang:1.24-alpine AS backend-builder
+# Using golang:latest to avoid version availability issues
+FROM golang:latest AS backend-builder
 WORKDIR /app
-RUN apk add --no-cache git
+RUN apt-get update && apt-get install -y git ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ ./cmd/

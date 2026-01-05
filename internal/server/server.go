@@ -67,6 +67,7 @@ func (s *Server) SetupRoutes() *gin.Engine {
 
 		// Account and user management routes
 		api.GET("/accounts", s.handler.ListAccounts)
+		api.GET("/users", s.handler.ListAllUsers) // All users from all accounts in parallel
 		api.GET("/accounts/:accountId/users", s.handler.ListUsers)
 		api.GET("/accounts/:accountId/users/:username", s.handler.GetUser)
 		api.DELETE("/accounts/:accountId/users/:username", s.handler.DeleteUser)
@@ -84,6 +85,27 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.GET("/accounts/:accountId/security-groups", s.handler.ListSecurityGroupsByAccount)
 		api.GET("/accounts/:accountId/regions/:region/security-groups/:groupId", s.handler.GetSecurityGroup)
 		api.DELETE("/accounts/:accountId/regions/:region/security-groups/:groupId", s.handler.DeleteSecurityGroup)
+
+		// Snapshots routes
+		api.GET("/snapshots", s.handler.ListSnapshots)
+		api.GET("/accounts/:accountId/snapshots", s.handler.ListSnapshotsByAccount)
+		api.DELETE("/accounts/:accountId/regions/:region/snapshots/:snapshotId", s.handler.DeleteSnapshot)
+
+		// EC2 instances routes
+		api.GET("/ec2-instances", s.handler.ListEC2Instances)
+		api.POST("/accounts/:accountId/regions/:region/instances/:instanceId/stop", s.handler.StopEC2Instance)
+		api.POST("/accounts/:accountId/regions/:region/instances/:instanceId/terminate", s.handler.TerminateEC2Instance)
+
+		// EBS volumes routes
+		api.GET("/ebs-volumes", s.handler.ListEBSVolumes)
+		api.GET("/accounts/:accountId/ebs-volumes", s.handler.ListEBSVolumesByAccount)
+		api.POST("/accounts/:accountId/regions/:region/volumes/:volumeId/detach", s.handler.DetachEBSVolume)
+		api.DELETE("/accounts/:accountId/regions/:region/volumes/:volumeId", s.handler.DeleteEBSVolume)
+
+		// S3 buckets routes
+		api.GET("/s3-buckets", s.handler.ListS3Buckets)
+		api.GET("/accounts/:accountId/s3-buckets", s.handler.ListS3BucketsByAccount)
+		api.DELETE("/accounts/:accountId/regions/:region/buckets/:bucketName", s.handler.DeleteS3Bucket)
 
 		// Azure enterprise applications routes (if Azure is configured)
 		if s.azureHandler != nil {
@@ -107,6 +129,9 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.POST("/cache/public-ips/invalidate", s.handler.InvalidatePublicIPsCache)
 		api.POST("/cache/security-groups/invalidate", s.handler.InvalidateSecurityGroupsCache)
 		api.POST("/cache/accounts/:accountId/security-groups/invalidate", s.handler.InvalidateAccountSecurityGroupsCache)
+		api.POST("/cache/ec2-instances/invalidate", s.handler.InvalidateEC2InstancesCache)
+		api.POST("/cache/ebs-volumes/invalidate", s.handler.InvalidateEBSVolumesCache)
+		api.POST("/cache/s3-buckets/invalidate", s.handler.InvalidateS3BucketsCache)
 	}
 
 	// Serve frontend

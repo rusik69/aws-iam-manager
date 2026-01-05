@@ -24,18 +24,9 @@ spec:
         ports:
         - containerPort: 8080
           name: http
-        env:
-        - name: AWS_ACCESS_KEY_ID
-          valueFrom:
-            secretKeyRef:
-              name: app-secrets
-              key: AWS_ACCESS_KEY_ID
-        - name: AWS_SECRET_ACCESS_KEY
-          valueFrom:
-            secretKeyRef:
-              name: app-secrets
-              key: AWS_SECRET_ACCESS_KEY
         envFrom:
+        - secretRef:
+            name: app-secrets
         - configMapRef:
             name: app-config
         livenessProbe:

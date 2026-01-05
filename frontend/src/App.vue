@@ -11,6 +11,10 @@
           <router-link to="/" class="nav-link">Users</router-link>
           <router-link to="/public-ips" class="nav-link">Public IPs</router-link>
           <router-link to="/security-groups" class="nav-link">Security Groups</router-link>
+          <router-link to="/snapshots" class="nav-link">Snapshots</router-link>
+          <router-link to="/ec2-instances" class="nav-link">EC2 Instances</router-link>
+          <router-link to="/ebs-volumes" class="nav-link">EBS Volumes</router-link>
+          <router-link to="/s3-buckets" class="nav-link">S3 Buckets</router-link>
           <router-link to="/azure/enterprise-apps" class="nav-link">Azure Apps</router-link>
           <button @click="toggleTheme" class="theme-btn">
             {{ isDarkTheme ? '☀️' : '🌙' }}
@@ -19,7 +23,11 @@
       </div>
     </header>
     <main>
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <keep-alive include="AllUsers">
+          <component :is="Component" />
+        </keep-alive>
+      </router-view>
     </main>
   </div>
 </template>
@@ -71,11 +79,13 @@ export default {
   --color-bg-primary: #ffffff;
   --color-bg-secondary: #f8f9fa;
   --color-bg-tertiary: #e9ecef;
+  --color-bg-hover: #f3f4f6;
   --color-text-primary: #1f2937;
   --color-text-secondary: #6b7280;
   --color-text-tertiary: #9ca3af;
   --color-border: #e5e7eb;
   --color-border-light: #f3f4f6;
+  --color-primary: #3b82f6;
   
   /* Button Colors */
   --color-btn-primary: #3b82f6;
@@ -126,11 +136,13 @@ export default {
   --color-bg-primary: #0d1117;
   --color-bg-secondary: #161b22;
   --color-bg-tertiary: #21262d;
+  --color-bg-hover: #1c2128;
   --color-text-primary: #f0f6fc;
   --color-text-secondary: #8b949e;
   --color-text-tertiary: #6e7681;
   --color-border: #30363d;
   --color-border-light: #21262d;
+  --color-primary: #58a6ff;
 }
 
 body {

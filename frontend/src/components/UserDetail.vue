@@ -571,16 +571,12 @@ export default {
       try {
         await axios.delete(`/api/accounts/${this.accountId}/users/${this.username}`)
         
-        // Explicitly invalidate cache to ensure fresh data on navigation back to AllUsers
-        try {
-          await axios.post(`/api/cache/accounts/${this.accountId}/invalidate`)
-        } catch (cacheErr) {
-          console.warn('Failed to invalidate account cache:', cacheErr)
-        }
-        
         alert(`User "${this.username}" has been successfully deleted.`)
-        // Navigate back to AllUsers page
-        this.$router.push('/')
+        // Navigate back to AllUsers page with deleted user info so it can update local cache
+        this.$router.push({
+          path: '/',
+          query: { deletedUser: this.username, deletedFromAccount: this.accountId }
+        })
       } catch (error) {
         console.error('Failed to delete user:', error)
         alert(error.response?.data?.error || 'Failed to delete user. Please try again.')

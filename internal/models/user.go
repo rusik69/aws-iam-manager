@@ -20,6 +20,13 @@ type User struct {
 	AccessKeys  []AccessKey `json:"access_keys"`
 }
 
+// UserWithAccount represents an AWS IAM user with account information
+type UserWithAccount struct {
+	User
+	AccountID   string `json:"accountId"`
+	AccountName string `json:"accountName"`
+}
+
 // AccessKey represents an AWS access key
 type AccessKey struct {
 	AccessKeyID  string     `json:"access_key_id"`
@@ -86,4 +93,86 @@ type OpenPortInfo struct {
 	PortRange   string `json:"port_range"`
 	Source      string `json:"source"`
 	Description string `json:"description"`
+}
+
+// Snapshot represents an AWS EBS snapshot
+type Snapshot struct {
+	SnapshotID  string    `json:"snapshot_id"`
+	VolumeID    string    `json:"volume_id"`
+	VolumeSize  int64     `json:"volume_size"` // in GiB
+	Description string    `json:"description"`
+	State       string    `json:"state"` // pending, completed, error
+	Progress    string    `json:"progress"`
+	StartTime   time.Time `json:"start_time"`
+	OwnerID     string    `json:"owner_id"`
+	Encrypted   bool      `json:"encrypted"`
+	AccountID   string    `json:"account_id"`
+	AccountName string    `json:"account_name"`
+	Region      string    `json:"region"`
+	Tags        []Tag     `json:"tags,omitempty"`
+}
+
+// Tag represents an AWS resource tag
+type Tag struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// EC2Instance represents an AWS EC2 instance
+type EC2Instance struct {
+	InstanceID   string    `json:"instance_id"`
+	Name         string    `json:"name"`          // From "Name" tag
+	AccountID    string    `json:"account_id"`
+	AccountName  string    `json:"account_name"`
+	Region       string    `json:"region"`
+	InstanceType string    `json:"instance_type"` // Flavor
+	LaunchTime   time.Time `json:"launch_time"`
+	State        string    `json:"state"` // running, stopped, etc.
+	Tags         []Tag     `json:"tags,omitempty"`
+}
+
+// EBSVolume represents an AWS EBS volume
+type EBSVolume struct {
+	VolumeID         string    `json:"volume_id"`
+	Name             string    `json:"name"` // From "Name" tag
+	AccountID        string    `json:"account_id"`
+	AccountName      string    `json:"account_name"`
+	Region           string    `json:"region"`
+	Size             int64     `json:"size"`              // in GiB
+	VolumeType       string    `json:"volume_type"`       // gp2, gp3, io1, io2, st1, sc1, standard
+	State            string    `json:"state"`             // creating, available, in-use, deleting, deleted, error
+	CreateTime       time.Time `json:"create_time"`
+	AvailabilityZone string    `json:"availability_zone"`
+	Encrypted        bool      `json:"encrypted"`
+	IOPS             int64     `json:"iops,omitempty"`
+	Throughput       int64     `json:"throughput,omitempty"` // MB/s (for gp3)
+	SnapshotID       string    `json:"snapshot_id,omitempty"`
+	Attachments      []VolumeAttachment `json:"attachments,omitempty"`
+	Tags             []Tag     `json:"tags,omitempty"`
+}
+
+// VolumeAttachment represents an EBS volume attachment
+type VolumeAttachment struct {
+	InstanceID string    `json:"instance_id"`
+	Device     string    `json:"device"`
+	State      string    `json:"state"` // attaching, attached, detaching, detached
+	AttachTime time.Time `json:"attach_time"`
+}
+
+// S3Bucket represents an AWS S3 bucket
+type S3Bucket struct {
+	Name                 string    `json:"name"`
+	AccountID            string    `json:"account_id"`
+	AccountName          string    `json:"account_name"`
+	Region               string    `json:"region"`
+	CreationDate         time.Time `json:"creation_date"`
+	Versioning           string    `json:"versioning"`            // Enabled, Suspended, or empty
+	Encrypted            bool      `json:"encrypted"`
+	PublicAccessBlocked  bool      `json:"public_access_blocked"` // True if all public access is blocked
+	Tags                 []Tag     `json:"tags,omitempty"`
+	Size                 int64     `json:"size,omitempty"`       // Total size in bytes (optional, can be expensive to calculate)
+	ObjectCount          int64     `json:"object_count,omitempty"` // Total number of objects (optional)
+	IsPublic             bool      `json:"is_public"`            // True if bucket has public access
+	HasLifecyclePolicy   bool      `json:"has_lifecycle_policy"`
+	HasLogging           bool      `json:"has_logging"`
 }
