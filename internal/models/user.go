@@ -170,9 +170,45 @@ type S3Bucket struct {
 	Encrypted            bool      `json:"encrypted"`
 	PublicAccessBlocked  bool      `json:"public_access_blocked"` // True if all public access is blocked
 	Tags                 []Tag     `json:"tags,omitempty"`
-	Size                 int64     `json:"size,omitempty"`       // Total size in bytes (optional, can be expensive to calculate)
-	ObjectCount          int64     `json:"object_count,omitempty"` // Total number of objects (optional)
 	IsPublic             bool      `json:"is_public"`            // True if bucket has public access
 	HasLifecyclePolicy   bool      `json:"has_lifecycle_policy"`
 	HasLogging           bool      `json:"has_logging"`
+}
+
+// IAMRole represents an AWS IAM role
+type IAMRole struct {
+	RoleName                   string                 `json:"role_name"`
+	RoleID                     string                 `json:"role_id"`
+	Arn                        string                 `json:"arn"`
+	AccountID                  string                 `json:"account_id"`
+	AccountName                string                 `json:"account_name"`
+	CreateDate                 time.Time              `json:"create_date"`
+	Path                       string                 `json:"path"`
+	Description                string                 `json:"description,omitempty"`
+	MaxSessionDuration         *int64                 `json:"max_session_duration,omitempty"`
+	AssumeRolePolicyDocument   string                 `json:"assume_role_policy_document"` // JSON string
+	AttachedManagedPolicies    []AttachedPolicy       `json:"attached_managed_policies,omitempty"`
+	InlinePolicies             []InlinePolicy         `json:"inline_policies,omitempty"`
+	InstanceProfiles           []string               `json:"instance_profiles,omitempty"`
+	Tags                       []Tag                  `json:"tags,omitempty"`
+	LastUsedDate               *time.Time             `json:"last_used_date,omitempty"`
+	LastUsedRegion             string                 `json:"last_used_region,omitempty"`
+}
+
+// RoleWithAccount represents an IAM role with account information
+type RoleWithAccount struct {
+	IAMRole
+}
+
+// AttachedPolicy represents an attached managed policy
+type AttachedPolicy struct {
+	PolicyArn    string     `json:"policy_arn"`
+	PolicyName   string     `json:"policy_name"`
+	AttachDate   *time.Time `json:"attach_date,omitempty"`
+}
+
+// InlinePolicy represents an inline policy
+type InlinePolicy struct {
+	PolicyName string `json:"policy_name"`
+	PolicyDocument string `json:"policy_document"` // JSON string
 }

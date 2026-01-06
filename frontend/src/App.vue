@@ -15,6 +15,7 @@
           <router-link to="/ec2-instances" class="nav-link">EC2 Instances</router-link>
           <router-link to="/ebs-volumes" class="nav-link">EBS Volumes</router-link>
           <router-link to="/s3-buckets" class="nav-link">S3 Buckets</router-link>
+          <router-link to="/roles" class="nav-link">IAM Roles</router-link>
           <router-link to="/azure/enterprise-apps" class="nav-link">Azure Apps</router-link>
           <button @click="toggleTheme" class="theme-btn">
             {{ isDarkTheme ? '☀️' : '🌙' }}

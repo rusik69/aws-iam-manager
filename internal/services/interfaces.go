@@ -42,6 +42,13 @@ type AWSServiceInterface interface {
 	ListS3BucketsByAccount(accountID string) ([]models.S3Bucket, error)
 	DeleteS3Bucket(accountID, region, bucketName string) error
 	InvalidateS3BucketsCache()
+	// IAM role management
+	ListRoles(accountID string) ([]models.IAMRole, error)
+	ListAllRoles() ([]models.RoleWithAccount, error)
+	GetRole(accountID, roleName string) (*models.IAMRole, error)
+	DeleteRole(accountID, roleName string) error
+	InvalidateRolesCache()
+	InvalidateAccountRolesCache(accountID string)
 	// Cache management methods
 	ClearCache()
 	InvalidateAccountCache(accountID string)

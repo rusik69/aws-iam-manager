@@ -726,3 +726,94 @@ func (h *Handler) InvalidateS3BucketsCache(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "S3 buckets cache invalidated successfully"})
 }
 
+// ============================================================================
+// IAM ROLE HANDLERS
+// ============================================================================
+
+func (h *Handler) ListRoles(c *gin.Context) {
+	accountID := c.Param("accountId")
+	roles, err := h.awsService.ListRoles(accountID)
+	if err != nil {
+		fmt.Printf("[ERROR] ListRoles failed for account %s: %v\n", accountID, err)
+		if containsAccessDenied(err.Error()) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":   "Access denied to account",
+				"details": fmt.Sprintf("Cannot access account %s. The role may not exist or trust relationship is not configured.", accountID),
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": fmt.Sprintf("Failed to list roles for account %s. Check AWS credentials and permissions.", accountID),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, roles)
+}
+
+func (h *Handler) ListAllRoles(c *gin.Context) {
+	roles, err := h.awsService.ListAllRoles()
+	if err != nil {
+		fmt.Printf("[ERROR] ListAllRoles failed: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": "Failed to list all roles. Check AWS credentials and permissions.",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, roles)
+}
+
+func (h *Handler) GetRole(c *gin.Context) {
+	accountID := c.Param("accountId")
+	roleName := c.Param("roleName")
+	role, err := h.awsService.GetRole(accountID, roleName)
+	if err != nil {
+		fmt.Printf("[ERROR] GetRole failed for role %s in account %s: %v\n", roleName, accountID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": fmt.Sprintf("Failed to get role %s from account %s. Check AWS credentials and permissions.", roleName, accountID),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, role)
+}
+
+func (h *Handler) DeleteRole(c *gin.Context) {
+	accountID := c.Param("accountId")
+	roleName := c.Param("roleName")
+	err := h.awsService.DeleteRole(accountID, roleName)
+	if err != nil {
+		fmt.Printf("[ERROR] DeleteRole failed for role %s in account %s: %v\n", roleName, accountID, err)
+		statusCode := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			statusCode = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "cannot access account") {
+			statusCode = http.StatusForbidden
+		}
+		c.JSON(statusCode, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("Role %s deleted successfully", roleName),
+	})
+}
+
+func (h *Handler) InvalidateRolesCache(c *gin.Context) {
+	h.awsService.InvalidateRolesCache()
+	c.JSON(http.StatusOK, gin.H{"message": "Roles cache invalidated successfully"})
+}
+
+func (h *Handler) InvalidateAccountRolesCache(c *gin.Context) {
+	accountID := c.Param("accountId")
+	if accountID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID is required",
+		})
+		return
+	}
+	h.awsService.InvalidateAccountRolesCache(accountID)
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Roles cache invalidated for account %s", accountID)})
+}

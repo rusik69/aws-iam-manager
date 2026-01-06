@@ -1,21 +1,21 @@
 <template>
-  <div class="s3-buckets-container">
+  <div class="roles-container">
     <!-- Header -->
     <div class="page-header">
       <div class="header-content">
         <div class="header-title">
           <div class="header-icon">
             <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19,15H15A3,3 0 0,1 12,12A3,3 0 0,1 15,9H19A3,3 0 0,1 22,12A3,3 0 0,1 19,15M5,15A3,3 0 0,1 2,12A3,3 0 0,1 5,9H9A3,3 0 0,1 12,12A3,3 0 0,1 9,15H5M19,10A2,2 0 0,0 17,12A2,2 0 0,0 19,14A2,2 0 0,0 21,12A2,2 0 0,0 19,10M5,10A2,2 0 0,0 3,12A2,2 0 0,0 5,14A2,2 0 0,0 7,12A2,2 0 0,0 5,10Z"/>
+              <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11.03L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11.03C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
             </svg>
           </div>
           <div class="title-content">
-            <h1>S3 Buckets</h1>
-            <p>{{ buckets.length }} buckets across {{ uniqueAccounts.length }} accounts</p>
+            <h1>IAM Roles</h1>
+            <p>{{ roles.length }} roles across {{ uniqueAccounts.length }} accounts</p>
           </div>
         </div>
         <div class="header-actions">
-          <button @click="downloadJSON" class="btn btn-success" :disabled="loading || buckets.length === 0">
+          <button @click="downloadJSON" class="btn btn-success" :disabled="loading || roles.length === 0">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
               <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
             </svg>
@@ -34,7 +34,7 @@
     <!-- Loading State -->
     <div v-if="loading" class="loading-container">
       <div class="loading-spinner"></div>
-      <p>Loading S3 buckets...</p>
+      <p>Loading IAM roles...</p>
     </div>
 
     <!-- Error State -->
@@ -44,7 +44,7 @@
           <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
         </svg>
       </div>
-      <h3>Failed to Load S3 Buckets</h3>
+      <h3>Failed to Load IAM Roles</h3>
       <p>{{ error }}</p>
       <button @click="loadData" class="btn btn-primary">Try Again</button>
     </div>
@@ -54,20 +54,20 @@
       <!-- Summary Stats -->
       <div class="summary-stats">
         <div class="stat-card">
-          <div class="stat-value">{{ buckets.length }}</div>
-          <div class="stat-label">Total Buckets</div>
+          <div class="stat-value">{{ roles.length }}</div>
+          <div class="stat-label">Total Roles</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">{{ encryptedBuckets }}</div>
-          <div class="stat-label">Encrypted</div>
+          <div class="stat-value">{{ rolesWithPolicies }}</div>
+          <div class="stat-label">With Policies</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">{{ publicBuckets }}</div>
-          <div class="stat-label">Public Access</div>
+          <div class="stat-value">{{ rolesWithInstanceProfiles }}</div>
+          <div class="stat-label">With Instance Profiles</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">{{ uniqueRegions.length }}</div>
-          <div class="stat-label">Regions</div>
+          <div class="stat-value">{{ uniqueAccounts.length }}</div>
+          <div class="stat-label">Accounts</div>
         </div>
       </div>
 
@@ -80,7 +80,7 @@
           <input
             v-model="searchQuery"
             type="text"
-            placeholder="Search by bucket name, account, or region..."
+            placeholder="Search by role name, account, or ARN..."
             class="search-input"
           />
         </div>
@@ -90,105 +90,89 @@
             {{ account.name }} ({{ account.id }})
           </option>
         </select>
-        <select v-model="filterRegion" class="filter-select">
-          <option value="">All Regions</option>
-          <option v-for="region in uniqueRegions" :key="region" :value="region">
-            {{ region }}
-          </option>
-        </select>
-        <select v-model="filterEncryption" class="filter-select">
-          <option value="">All Buckets</option>
-          <option value="encrypted">Encrypted Only</option>
-          <option value="unencrypted">Unencrypted Only</option>
-        </select>
-        <select v-model="filterPublic" class="filter-select">
-          <option value="">All Access Levels</option>
-          <option value="public">Public Access</option>
-          <option value="private">Private Only</option>
-        </select>
       </div>
 
-      <!-- Buckets Table -->
+      <!-- Roles Table -->
       <div class="table-container">
-        <div v-if="filteredBuckets.length === 0" class="empty-state">
+        <div v-if="filteredRoles.length === 0" class="empty-state">
           <div class="empty-icon">
             <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19,15H15A3,3 0 0,1 12,12A3,3 0 0,1 15,9H19A3,3 0 0,1 22,12A3,3 0 0,1 19,15M5,15A3,3 0 0,1 2,12A3,3 0 0,1 5,9H9A3,3 0 0,1 12,12A3,3 0 0,1 9,15H5M19,10A2,2 0 0,0 17,12A2,2 0 0,0 19,14A2,2 0 0,0 21,12A2,2 0 0,0 19,10M5,10A2,2 0 0,0 3,12A2,2 0 0,0 5,14A2,2 0 0,0 7,12A2,2 0 0,0 5,10Z"/>
+              <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11.03L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11.03C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
             </svg>
           </div>
-          <h4>No buckets found</h4>
-          <p>No buckets match the current search and filter criteria.</p>
+          <h4>No roles found</h4>
+          <p>No roles match the current search and filter criteria.</p>
         </div>
-        <table v-else class="buckets-table">
+        <table v-else class="roles-table">
           <thead>
             <tr>
-              <th @click="sortBy('name')" class="sortable">
-                Bucket Name
-                <span class="sort-indicator" v-if="sortField === 'name'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
+              <th @click="sortBy('role_name')" class="sortable">
+                Role Name
+                <span class="sort-indicator" v-if="sortField === 'role_name'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
               </th>
               <th @click="sortBy('account_name')" class="sortable">
                 Account
                 <span class="sort-indicator" v-if="sortField === 'account_name'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
               </th>
-              <th @click="sortBy('region')" class="sortable">
-                Region
-                <span class="sort-indicator" v-if="sortField === 'region'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
+              <th @click="sortBy('path')" class="sortable">
+                Path
+                <span class="sort-indicator" v-if="sortField === 'path'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
               </th>
-              <th @click="sortBy('creation_date')" class="sortable">
+              <th @click="sortBy('create_date')" class="sortable">
                 Created
-                <span class="sort-indicator" v-if="sortField === 'creation_date'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
+                <span class="sort-indicator" v-if="sortField === 'create_date'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
               </th>
-              <th>Security</th>
-              <th>Features</th>
+              <th>Policies</th>
+              <th>Last Used</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="bucket in filteredBuckets" :key="bucket.name" class="data-row">
-              <td><code class="bucket-name">{{ bucket.name }}</code></td>
+            <tr v-for="role in filteredRoles" :key="role.arn" class="data-row">
+              <td>
+                <code class="role-name">{{ role.role_name }}</code>
+              </td>
               <td>
                 <div class="account-info">
-                  <div class="account-name">{{ bucket.account_name }}</div>
-                  <div class="account-id">{{ bucket.account_id }}</div>
+                  <div class="account-name">{{ role.account_name }}</div>
+                  <div class="account-id">{{ role.account_id }}</div>
                 </div>
               </td>
-              <td>{{ bucket.region }}</td>
+              <td>{{ role.path }}</td>
               <td>
                 <div class="date-info">
-                  <div class="date-value">{{ formatDate(bucket.creation_date) }}</div>
-                  <div class="date-relative">{{ formatRelativeDate(bucket.creation_date) }}</div>
+                  <div class="date-value">{{ formatDate(role.create_date) }}</div>
+                  <div class="date-relative">{{ formatRelativeDate(role.create_date) }}</div>
                 </div>
               </td>
               <td>
-                <div class="security-badges">
-                  <span :class="['badge', bucket.encrypted ? 'badge-success' : 'badge-warning']">
-                    {{ bucket.encrypted ? 'Encrypted' : 'Not Encrypted' }}
+                <div class="policy-info">
+                  <span v-if="role.attached_managed_policies && role.attached_managed_policies.length > 0" class="badge badge-info">
+                    {{ role.attached_managed_policies.length }} Managed
                   </span>
-                  <span :class="['badge', bucket.is_public ? 'badge-danger' : 'badge-success']">
-                    {{ bucket.is_public ? 'Public' : 'Private' }}
+                  <span v-if="role.inline_policies && role.inline_policies.length > 0" class="badge badge-secondary">
+                    {{ role.inline_policies.length }} Inline
                   </span>
-                  <span v-if="bucket.versioning === 'Enabled'" class="badge badge-info">
-                    Versioning
+                  <span v-if="(!role.attached_managed_policies || role.attached_managed_policies.length === 0) && (!role.inline_policies || role.inline_policies.length === 0)" class="badge badge-warning">
+                    No Policies
                   </span>
                 </div>
               </td>
               <td>
-                <div class="feature-badges">
-                  <span v-if="bucket.has_lifecycle_policy" class="badge badge-secondary" title="Lifecycle Policy">
-                    Lifecycle
-                  </span>
-                  <span v-if="bucket.has_logging" class="badge badge-secondary" title="Logging Enabled">
-                    Logging
-                  </span>
+                <div v-if="role.last_used_date" class="date-info">
+                  <div class="date-value">{{ formatDate(role.last_used_date) }}</div>
+                  <div class="date-relative">{{ formatRelativeDate(role.last_used_date) }}</div>
+                  <div v-if="role.last_used_region" class="region-info">{{ role.last_used_region }}</div>
                 </div>
+                <span v-else class="badge badge-secondary">Never</span>
               </td>
               <td>
                 <div class="action-buttons">
                   <button
-                    @click="deleteBucket(bucket)"
+                    @click="deleteRole(role)"
                     class="action-btn action-btn-delete"
                     :disabled="loading"
-                    title="Delete bucket (must be empty)"
+                    title="Delete role"
                   >
                     <svg viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -209,70 +193,55 @@
 import axios from 'axios'
 
 export default {
-  name: 'S3Buckets',
+  name: 'Roles',
   data() {
     return {
-      buckets: [],
+      roles: [],
       loading: true,
       error: null,
       searchQuery: '',
       filterAccount: '',
-      filterRegion: '',
-      filterEncryption: '',
-      filterPublic: '',
-      sortField: 'creation_date',
+      sortField: 'create_date',
       sortDirection: 'desc'
     }
   },
   computed: {
     uniqueAccounts() {
       const accounts = new Map()
-      this.buckets.forEach(b => {
-        if (!accounts.has(b.account_id)) {
-          accounts.set(b.account_id, { id: b.account_id, name: b.account_name })
+      this.roles.forEach(r => {
+        if (!accounts.has(r.account_id)) {
+          accounts.set(r.account_id, { id: r.account_id, name: r.account_name })
         }
       })
       return Array.from(accounts.values()).sort((a, b) => a.name.localeCompare(b.name))
     },
-    uniqueRegions() {
-      return [...new Set(this.buckets.map(b => b.region))].sort()
+    rolesWithPolicies() {
+      return this.roles.filter(r => 
+        (r.attached_managed_policies && r.attached_managed_policies.length > 0) ||
+        (r.inline_policies && r.inline_policies.length > 0)
+      ).length
     },
-    encryptedBuckets() {
-      return this.buckets.filter(b => b.encrypted).length
+    rolesWithInstanceProfiles() {
+      return this.roles.filter(r => r.instance_profiles && r.instance_profiles.length > 0).length
     },
-    publicBuckets() {
-      return this.buckets.filter(b => b.is_public).length
-    },
-    filteredBuckets() {
-      let result = this.buckets
+    filteredRoles() {
+      let result = this.roles
 
       // Apply search filter
       if (this.searchQuery) {
         const query = this.searchQuery.toLowerCase()
-        result = result.filter(b =>
-          b.name.toLowerCase().includes(query) ||
-          b.account_name.toLowerCase().includes(query) ||
-          b.account_id.toLowerCase().includes(query) ||
-          b.region.toLowerCase().includes(query)
+        result = result.filter(r =>
+          r.role_name.toLowerCase().includes(query) ||
+          r.account_name.toLowerCase().includes(query) ||
+          r.account_id.toLowerCase().includes(query) ||
+          r.arn.toLowerCase().includes(query) ||
+          (r.path && r.path.toLowerCase().includes(query))
         )
       }
 
-      // Apply filters
+      // Apply account filter
       if (this.filterAccount) {
-        result = result.filter(b => b.account_id === this.filterAccount)
-      }
-      if (this.filterRegion) {
-        result = result.filter(b => b.region === this.filterRegion)
-      }
-      if (this.filterEncryption === 'encrypted') {
-        result = result.filter(b => b.encrypted)
-      } else if (this.filterEncryption === 'unencrypted') {
-        result = result.filter(b => !b.encrypted)
-      }
-      if (this.filterPublic === 'public') {
-        result = result.filter(b => b.is_public)
-      } else if (this.filterPublic === 'private') {
-        result = result.filter(b => !b.is_public)
+        result = result.filter(r => r.account_id === this.filterAccount)
       }
 
       // Apply sorting
@@ -280,7 +249,7 @@ export default {
         let aVal = a[this.sortField]
         let bVal = b[this.sortField]
 
-        if (this.sortField === 'creation_date') {
+        if (this.sortField === 'create_date' || this.sortField === 'last_used_date') {
           aVal = new Date(aVal)
           bVal = new Date(bVal)
         } else if (typeof aVal === 'string') {
@@ -306,10 +275,10 @@ export default {
       try {
         this.loading = true
         this.error = null
-        const response = await axios.get('/api/s3-buckets')
-        this.buckets = response.data || []
+        const response = await axios.get('/api/roles')
+        this.roles = response.data || []
       } catch (err) {
-        this.error = err.response?.data?.error || 'Failed to load S3 buckets'
+        this.error = err.response?.data?.error || 'Failed to load IAM roles'
       } finally {
         this.loading = false
       }
@@ -317,7 +286,7 @@ export default {
     async refreshData() {
       // Invalidate cache before refreshing
       try {
-        await axios.post('/api/cache/s3-buckets/invalidate')
+        await axios.post('/api/cache/roles/invalidate')
       } catch (error) {
         console.warn('Failed to invalidate cache:', error)
       }
@@ -328,7 +297,7 @@ export default {
         this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc'
       } else {
         this.sortField = field
-        this.sortDirection = field === 'creation_date' ? 'desc' : 'asc'
+        this.sortDirection = field === 'create_date' || field === 'last_used_date' ? 'desc' : 'asc'
       }
     },
     formatDate(dateString) {
@@ -356,15 +325,13 @@ export default {
       try {
         const exportData = {
           exported_at: new Date().toISOString(),
-          total_buckets: this.filteredBuckets.length,
-          encrypted_buckets: this.filteredBuckets.filter(b => b.encrypted).length,
-          public_buckets: this.filteredBuckets.filter(b => b.is_public).length,
-          buckets: this.filteredBuckets
+          total_roles: this.filteredRoles.length,
+          roles: this.filteredRoles
         }
 
         const dataStr = JSON.stringify(exportData, null, 2)
         const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr)
-        const exportFileDefaultName = `aws-s3-buckets-${new Date().toISOString().split('T')[0]}.json`
+        const exportFileDefaultName = `aws-iam-roles-${new Date().toISOString().split('T')[0]}.json`
 
         const linkElement = document.createElement('a')
         linkElement.setAttribute('href', dataUri)
@@ -375,26 +342,26 @@ export default {
         alert('Failed to download JSON file')
       }
     },
-    async deleteBucket(bucket) {
+    async deleteRole(role) {
       const confirmed = confirm(
-        `Are you sure you want to delete bucket "${bucket.name}"?\n\n` +
-        `WARNING: The bucket must be empty to be deleted. This action cannot be undone.`
+        `Are you sure you want to delete role "${role.role_name}"?\n\n` +
+        `WARNING: This will detach all policies and remove the role from instance profiles. This action cannot be undone.`
       )
       if (!confirmed) return
 
       try {
         this.loading = true
-        const url = `/api/accounts/${bucket.account_id}/regions/${bucket.region}/buckets/${bucket.name}`
+        const url = `/api/accounts/${role.account_id}/roles/${role.role_name}`
         await axios.delete(url)
 
         // Reload data - the cache has been updated
         await this.loadData()
 
-        alert(`Bucket ${bucket.name} deleted successfully`)
+        alert(`Role ${role.role_name} deleted successfully`)
       } catch (err) {
-        const errorMsg = err.response?.data?.error || 'Failed to delete bucket'
+        const errorMsg = err.response?.data?.error || 'Failed to delete role'
         alert(`Error: ${errorMsg}`)
-        console.error('Failed to delete bucket:', err)
+        console.error('Failed to delete role:', err)
       } finally {
         this.loading = false
       }
@@ -404,7 +371,7 @@ export default {
 </script>
 
 <style scoped>
-.s3-buckets-container {
+.roles-container {
   min-height: 100vh;
   background: var(--color-bg-secondary);
   padding: 1.5rem;
@@ -434,7 +401,7 @@ export default {
 .header-icon {
   width: 48px;
   height: 48px;
-  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
   border-radius: 12px;
   display: flex;
   align-items: center;
@@ -510,6 +477,16 @@ export default {
   background: var(--color-bg-hover);
 }
 
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
 .loading-container {
   background: var(--color-bg-primary);
   border-radius: 12px;
@@ -568,16 +545,6 @@ export default {
 .error-container p {
   color: var(--color-text-secondary);
   margin: 0 0 1.5rem 0;
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-}
-
-.btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
 .main-content {
@@ -708,16 +675,16 @@ export default {
   margin: 0;
 }
 
-.buckets-table {
+.roles-table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.buckets-table thead {
+.roles-table thead {
   background: var(--color-bg-secondary);
 }
 
-.buckets-table th {
+.roles-table th {
   padding: 1rem 1.5rem;
   text-align: left;
   font-weight: 600;
@@ -729,7 +696,7 @@ export default {
   user-select: none;
 }
 
-.buckets-table th.sortable:hover {
+.roles-table th.sortable:hover {
   color: var(--color-primary);
 }
 
@@ -738,20 +705,20 @@ export default {
   color: var(--color-primary);
 }
 
-.buckets-table tbody tr {
+.roles-table tbody tr {
   border-top: 1px solid var(--color-border);
 }
 
-.buckets-table tbody tr:hover {
+.roles-table tbody tr:hover {
   background: var(--color-bg-hover);
 }
 
-.buckets-table td {
+.roles-table td {
   padding: 1rem 1.5rem;
   color: var(--color-text-primary);
 }
 
-.bucket-name {
+.role-name {
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   font-size: 0.9rem;
   background: var(--color-bg-secondary);
@@ -791,8 +758,12 @@ export default {
   color: var(--color-text-secondary);
 }
 
-.security-badges,
-.feature-badges {
+.region-info {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+}
+
+.policy-info {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -903,12 +874,12 @@ export default {
     width: 100%;
   }
 
-  .buckets-table {
+  .roles-table {
     font-size: 0.85rem;
   }
 
-  .buckets-table th,
-  .buckets-table td {
+  .roles-table th,
+  .roles-table td {
     padding: 0.75rem 1rem;
   }
 }

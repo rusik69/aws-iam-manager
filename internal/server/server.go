@@ -107,6 +107,12 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.GET("/accounts/:accountId/s3-buckets", s.handler.ListS3BucketsByAccount)
 		api.DELETE("/accounts/:accountId/regions/:region/buckets/:bucketName", s.handler.DeleteS3Bucket)
 
+		// IAM roles routes
+		api.GET("/roles", s.handler.ListAllRoles)
+		api.GET("/accounts/:accountId/roles", s.handler.ListRoles)
+		api.GET("/accounts/:accountId/roles/:roleName", s.handler.GetRole)
+		api.DELETE("/accounts/:accountId/roles/:roleName", s.handler.DeleteRole)
+
 		// Azure enterprise applications routes (if Azure is configured)
 		if s.azureHandler != nil {
 			azure := api.Group("/azure")
@@ -132,6 +138,8 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.POST("/cache/ec2-instances/invalidate", s.handler.InvalidateEC2InstancesCache)
 		api.POST("/cache/ebs-volumes/invalidate", s.handler.InvalidateEBSVolumesCache)
 		api.POST("/cache/s3-buckets/invalidate", s.handler.InvalidateS3BucketsCache)
+		api.POST("/cache/roles/invalidate", s.handler.InvalidateRolesCache)
+		api.POST("/cache/accounts/:accountId/roles/invalidate", s.handler.InvalidateAccountRolesCache)
 	}
 
 	// Serve frontend

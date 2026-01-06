@@ -10,6 +10,7 @@ import Snapshots from './components/Snapshots.vue'
 import EC2Instances from './components/EC2Instances.vue'
 import EBSVolumes from './components/EBSVolumes.vue'
 import S3Buckets from './components/S3Buckets.vue'
+import Roles from './components/Roles.vue'
 import AzureEnterpriseApps from './components/AzureEnterpriseApps.vue'
 
 const routes = [
@@ -21,6 +22,7 @@ const routes = [
   { path: '/ec2-instances', name: 'EC2Instances', component: EC2Instances },
   { path: '/ebs-volumes', name: 'EBSVolumes', component: EBSVolumes },
   { path: '/s3-buckets', name: 'S3Buckets', component: S3Buckets },
+  { path: '/roles', name: 'Roles', component: Roles },
   { path: '/accounts/:accountId/users/:username', name: 'UserDetail', component: UserDetail, props: true },
   { path: '/azure/enterprise-apps', name: 'AzureEnterpriseApps', component: AzureEnterpriseApps }
 ]
