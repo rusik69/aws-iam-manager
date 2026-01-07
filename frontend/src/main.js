@@ -11,6 +11,9 @@ import EC2Instances from './components/EC2Instances.vue'
 import EBSVolumes from './components/EBSVolumes.vue'
 import S3Buckets from './components/S3Buckets.vue'
 import Roles from './components/Roles.vue'
+import LoadBalancers from './components/LoadBalancers.vue'
+import VPCs from './components/VPCs.vue'
+import NATGateways from './components/NATGateways.vue'
 import AzureEnterpriseApps from './components/AzureEnterpriseApps.vue'
 
 const routes = [
@@ -23,6 +26,9 @@ const routes = [
   { path: '/ebs-volumes', name: 'EBSVolumes', component: EBSVolumes },
   { path: '/s3-buckets', name: 'S3Buckets', component: S3Buckets },
   { path: '/roles', name: 'Roles', component: Roles },
+  { path: '/load-balancers', name: 'LoadBalancers', component: LoadBalancers },
+  { path: '/vpcs', name: 'VPCs', component: VPCs },
+  { path: '/nat-gateways', name: 'NATGateways', component: NATGateways },
   { path: '/accounts/:accountId/users/:username', name: 'UserDetail', component: UserDetail, props: true },
   { path: '/azure/enterprise-apps', name: 'AzureEnterpriseApps', component: AzureEnterpriseApps }
 ]

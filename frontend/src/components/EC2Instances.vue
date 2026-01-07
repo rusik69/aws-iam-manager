@@ -15,6 +15,17 @@
           </div>
         </div>
         <div class="header-actions">
+          <button 
+            @click="terminateAllStoppedInstances" 
+            class="btn btn-danger" 
+            :disabled="loading || !filterAccount || stoppedInstancesCount === 0"
+            :title="!filterAccount ? 'Select an account first to enable bulk terminate' : (stoppedInstancesCount === 0 ? 'No stopped instances in this account' : `Terminate ${stoppedInstancesCount} stopped instance(s) in ${selectedAccountName}`)"
+          >
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+            Terminate All Stopped ({{ stoppedInstancesCount }})
+          </button>
           <button @click="downloadJSON" class="btn btn-success" :disabled="loading || instances.length === 0">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
               <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
@@ -60,6 +71,10 @@
         <div class="stat-card">
           <div class="stat-value">{{ runningInstances }}</div>
           <div class="stat-label">Running</div>
+        </div>
+        <div class="stat-card stat-card-stopped">
+          <div class="stat-value">{{ stoppedInstancesCount }}</div>
+          <div class="stat-label">Stopped</div>
         </div>
         <div class="stat-card">
           <div class="stat-value">{{ uniqueAccounts.length }}</div>
@@ -244,6 +259,27 @@ export default {
     runningInstances() {
       return this.instances.filter(i => i.state === 'running').length
     },
+    stoppedInstancesCount() {
+      // If account filter is set, only count instances from that account
+      let instancesToCheck = this.instances
+      if (this.filterAccount) {
+        instancesToCheck = instancesToCheck.filter(i => i.account_id === this.filterAccount)
+      }
+      return instancesToCheck.filter(i => i.state === 'stopped').length
+    },
+    stoppedInstances() {
+      // Get all stopped instances, optionally filtered by account
+      let instancesToCheck = this.instances
+      if (this.filterAccount) {
+        instancesToCheck = instancesToCheck.filter(i => i.account_id === this.filterAccount)
+      }
+      return instancesToCheck.filter(i => i.state === 'stopped')
+    },
+    selectedAccountName() {
+      if (!this.filterAccount) return ''
+      const account = this.uniqueAccounts.find(a => a.id === this.filterAccount)
+      return account ? account.name : this.filterAccount
+    },
     filteredInstances() {
       let result = this.instances
 
@@ -418,6 +454,77 @@ export default {
         const errorMsg = err.response?.data?.error || 'Failed to terminate instance'
         alert(`Error: ${errorMsg}`)
         console.error('Failed to terminate instance:', err)
+      } finally {
+        this.loading = false
+      }
+    },
+    async terminateAllStoppedInstances() {
+      const stoppedInsts = this.stoppedInstances
+      if (stoppedInsts.length === 0) {
+        alert('No stopped instances to terminate')
+        return
+      }
+
+      const instancesList = stoppedInsts.slice(0, 10).map(i => `  - ${i.instance_id} (${i.name || 'no name'}, ${i.region})`).join('\n')
+      const moreText = stoppedInsts.length > 10 ? `\n  ... and ${stoppedInsts.length - 10} more` : ''
+
+      const confirmed = confirm(
+        `Are you sure you want to TERMINATE ALL ${stoppedInsts.length} stopped instance(s)?\n\n` +
+        `Account: ${this.selectedAccountName}\n\n` +
+        `Instances to terminate:\n${instancesList}${moreText}\n\n` +
+        `WARNING: This action cannot be undone!\n` +
+        `All stopped instances in this account will be permanently deleted.`
+      )
+      if (!confirmed) return
+
+      // Double confirmation for bulk terminate
+      const doubleConfirmed = confirm(
+        `FINAL CONFIRMATION\n\n` +
+        `You are about to terminate ${stoppedInsts.length} stopped instance(s).\n\n` +
+        `This will permanently delete these instances and all their data.\n\n` +
+        `Click OK to proceed with termination.`
+      )
+      if (!doubleConfirmed) return
+
+      try {
+        this.loading = true
+        let successCount = 0
+        let failCount = 0
+        const errors = []
+
+        // Terminate instances one by one
+        for (const instance of stoppedInsts) {
+          try {
+            const url = `/api/accounts/${instance.account_id}/regions/${instance.region}/instances/${instance.instance_id}/terminate`
+            await axios.post(url)
+            successCount++
+            
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 200))
+          } catch (err) {
+            failCount++
+            const errorMsg = err.response?.data?.error || err.message || 'Unknown error'
+            errors.push(`${instance.instance_id}: ${errorMsg}`)
+            console.error(`Failed to terminate instance ${instance.instance_id}:`, err)
+          }
+        }
+
+        // Reload data
+        await this.loadData()
+
+        // Show results
+        let message = `Terminated ${successCount} instance(s) successfully`
+        if (failCount > 0) {
+          message += `\n\nFailed to terminate ${failCount} instance(s):\n${errors.slice(0, 5).join('\n')}`
+          if (errors.length > 5) {
+            message += `\n... and ${errors.length - 5} more errors (check console)`
+          }
+        }
+        alert(message)
+      } catch (err) {
+        const errorMsg = err.response?.data?.error || 'Failed to terminate instances'
+        alert(`Error: ${errorMsg}`)
+        console.error('Failed to terminate instances:', err)
       } finally {
         this.loading = false
       }
@@ -603,6 +710,16 @@ export default {
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
+.btn-danger {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+}
+
 .main-content {
   display: flex;
   flex-direction: column;
@@ -634,6 +751,15 @@ export default {
   font-size: 0.9rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.stat-card-stopped {
+  border: 2px solid rgba(239, 68, 68, 0.3);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.05) 0%, rgba(239, 68, 68, 0.02) 100%);
+}
+
+.stat-card-stopped .stat-value {
+  color: #ef4444;
 }
 
 .filters {

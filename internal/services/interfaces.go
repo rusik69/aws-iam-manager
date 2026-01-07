@@ -49,6 +49,22 @@ type AWSServiceInterface interface {
 	DeleteRole(accountID, roleName string) error
 	InvalidateRolesCache()
 	InvalidateAccountRolesCache(accountID string)
+	// Load balancer management
+	ListAllLoadBalancers() ([]models.LoadBalancer, error)
+	ListLoadBalancersByAccount(accountID string) ([]models.LoadBalancer, error)
+	DeleteLoadBalancer(accountID, region, loadBalancerArnOrName, lbType string) error
+	InvalidateLoadBalancersCache(accountID string)
+	InvalidateAllLoadBalancersCache()
+	// VPC management
+	ListVPCs() ([]models.VPC, error)
+	ListVPCsByAccount(accountID string) ([]models.VPC, error)
+	DeleteVPC(accountID, region, vpcID string) error
+	InvalidateVPCsCache()
+	// NAT Gateway management
+	ListNATGateways() ([]models.NATGateway, error)
+	ListNATGatewaysByAccount(accountID string) ([]models.NATGateway, error)
+	DeleteNATGateway(accountID, region, natGatewayID string) error
+	InvalidateNATGatewaysCache()
 	// Cache management methods
 	ClearCache()
 	InvalidateAccountCache(accountID string)

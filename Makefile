@@ -1,4 +1,4 @@
-.PHONY: build build-frontend build-backend build-cli dev dev-stop dev-logs dev-cli dev-frontend dev-backend test fmt lint install check install-linter tidy deps preview clean-build ci pre-commit build-prod build-release release help deploy-user remove-user create-role remove-role deploy-stackset update-stackset status-stackset remove-stackset delete-stackset cli-status check-aws-config deploy validate-prod-env docker-build docker-build-ghcr docker-build-multiarch docker-build-multiarch-push docker-push-ghcr lint-docker docker-run
+.PHONY: build build-frontend build-backend build-cli dev dev-stop dev-logs dev-cli dev-frontend dev-backend test fmt lint install check install-linter tidy deps preview clean-build ci pre-commit build-prod build-release release help deploy-user remove-user create-role remove-role deploy-stackset update-stackset status-stackset remove-stackset delete-stackset cli-status check-aws-config unset-variables unset-variables-exec deploy validate-prod-env docker-build docker-build-ghcr docker-build-multiarch docker-build-multiarch-push docker-push-ghcr lint-docker docker-run
 
 
 # Default target
@@ -59,6 +59,7 @@ help:
 	@echo ""
 	@echo "🔧 Setup & Configuration:"
 	@echo "  check-aws-config - Verify AWS credentials and configuration"
+	@echo "  unset-variables  - Show command to unset AWS credential environment variables"
 	@echo "  validate-prod-env - Validate production environment file (.env.prod)"
 	@echo ""
 	@echo "🚀 CI/CD & Quality:"
@@ -148,13 +149,14 @@ dev:
 	fi
 	@echo "📦 Building frontend..."
 	@cd frontend && npm run build
-	@echo "🐳 Building Docker image locally..."
+	@echo "🐳 Building Docker image locally (no cache)..."
 	@DOCKER_BUILDKIT=1 docker build \
+		--no-cache \
 		--build-arg BUILDKIT_INLINE_CACHE=1 \
 		--network=host \
 		-t aws-iam-manager:dev . || \
 		(echo "❌ Docker build failed. Trying without network isolation..." && \
-		 docker build --network=host -t aws-iam-manager:dev .)
+		 docker build --no-cache --network=host -t aws-iam-manager:dev .)
 	@echo "☸️  Deploying to Kubernetes cluster..."
 	@kubectl apply -f k8s/namespace.yaml
 	@kubectl create secret generic app-secrets --namespace=aws-iam-manager \
@@ -164,6 +166,8 @@ dev:
 	@sed 's|image: ghcr.io/rusik69/aws-iam-manager:latest|image: aws-iam-manager:dev\n        imagePullPolicy: Never|' \
 		k8s/app-deployment.yaml | kubectl apply -f -
 	@kubectl apply -f k8s/service.yaml
+	@echo "🔄 Forcing pod restart to pick up new image..."
+	@kubectl rollout restart deployment/aws-iam-manager -n aws-iam-manager
 	@echo "⏳ Waiting for deployment to be ready..."
 	@kubectl rollout status deployment/aws-iam-manager -n aws-iam-manager --timeout=120s
 	@echo "✅ Deployment ready!"
@@ -344,6 +348,24 @@ check-aws-config:
 		echo "⚠️  AWS CLI not installed - install it for easier credential management"; \
 	fi
 
+# Unset AWS credential environment variables
+unset-variables:
+	@echo "🧹 Unsetting AWS credential environment variables..."
+	@echo ""
+	@echo "Run this command in your shell to unset AWS credentials:"
+	@echo ""
+	@echo "  unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN"
+	@echo ""
+	@echo "Or source this command:"
+	@echo "  eval \"\$$(make unset-variables-exec)\""
+	@echo ""
+	@echo "To verify credentials are unset, run:"
+	@echo "  env | grep AWS_"
+
+# Internal target that outputs unset commands (for use with eval)
+unset-variables-exec:
+	@echo "unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; echo '✅ AWS credentials unset'"
+
 # ============================================================================
 # AWS IAM MANAGEMENT TARGETS
 # ============================================================================
@@ -428,14 +450,31 @@ update-stackset:
 	fi
 	@echo "📋 Template: cloudformation/iam-manager-role.yaml"
 	@echo "🔍 Checking StackSet exists..."
-	@aws cloudformation describe-stack-set --stack-set-name IAMManagerCrossAccountRole >/dev/null 2>&1 || \
-		(echo "❌ Error: StackSet 'IAMManagerCrossAccountRole' not found. Run 'make deploy-stackset' first."; exit 1)
-	@echo "📤 Updating StackSet..."
-	@aws cloudformation update-stack-set \
-		--stack-set-name IAMManagerCrossAccountRole \
+	@aws cloudformation describe-stack-set --stack-set-name IAMManagerRoleStackSet >/dev/null 2>&1 || \
+		(echo "❌ Error: StackSet 'IAMManagerRoleStackSet' not found. Run 'make deploy-stackset' first."; exit 1)
+	@echo "🔍 Getting current account ID..."
+	@MASTER_ACCOUNT_ID=$$(aws sts get-caller-identity --query Account --output text 2>/dev/null); \
+	if [ -z "$$MASTER_ACCOUNT_ID" ]; then \
+		echo "❌ Error: Failed to get current account ID. Check AWS credentials."; \
+		exit 1; \
+	fi; \
+	MASTER_USER_NAME=$${IAM_USER_NAME:-iam-manager}; \
+	ROLE_NAME=$${IAM_ORG_ROLE_NAME:-IAMManagerCrossAccountRole}; \
+	echo "📊 StackSet Parameters:"; \
+	echo "  Master Account ID: $$MASTER_ACCOUNT_ID"; \
+	echo "  Master User Name: $$MASTER_USER_NAME"; \
+	echo "  Role Name: $$ROLE_NAME"; \
+	echo ""; \
+	echo "📤 Updating StackSet in parallel across all accounts..."; \
+	aws cloudformation update-stack-set \
+		--stack-set-name IAMManagerRoleStackSet \
 		--template-body file://cloudformation/iam-manager-role.yaml \
 		--capabilities CAPABILITY_NAMED_IAM \
-		--operation-preferences FailureToleranceCount=0,MaxConcurrentPercentage=100 \
+		--parameters \
+			ParameterKey=MasterAccountId,ParameterValue=$$MASTER_ACCOUNT_ID \
+			ParameterKey=RoleName,ParameterValue=$$ROLE_NAME \
+			ParameterKey=MasterUserName,ParameterValue=$$MASTER_USER_NAME \
+		--operation-preferences FailureToleranceCount=0,MaxConcurrentPercentage=100,RegionConcurrencyType=PARALLEL \
 		--output text > /tmp/stackset-operation-id.txt || \
 		(echo "⚠️  No updates to perform or update failed"; exit 0)
 	@if [ -s /tmp/stackset-operation-id.txt ]; then \
@@ -443,12 +482,13 @@ update-stackset:
 		echo "✅ StackSet update initiated"; \
 		echo "📊 Operation ID: $$OPERATION_ID"; \
 		echo ""; \
+		echo "🚀 Updating all accounts in parallel (MaxConcurrentPercentage=100, RegionConcurrencyType=PARALLEL)"; \
 		echo "⏳ Waiting for update to complete across all accounts..."; \
-		echo "💡 This may take several minutes depending on the number of accounts"; \
+		echo "💡 Accounts are being updated concurrently for faster completion"; \
 		echo ""; \
 		while true; do \
 			STATUS=$$(aws cloudformation describe-stack-set-operation \
-				--stack-set-name IAMManagerCrossAccountRole \
+				--stack-set-name IAMManagerRoleStackSet \
 				--operation-id $$OPERATION_ID \
 				--query 'StackSetOperation.Status' \
 				--output text 2>/dev/null || echo "UNKNOWN"); \

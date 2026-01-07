@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/rusik69/aws-iam-manager/internal/config"
 	"github.com/rusik69/aws-iam-manager/internal/handlers"
@@ -44,8 +45,48 @@ func NewServer(cfg config.Config) *Server {
 	}
 }
 
+// customLogger is a logging middleware that skips health check endpoints
+func customLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Skip logging for health check endpoints
+		path := c.Request.URL.Path
+		if path == "/ping" || path == "/ready" || path == "/health" {
+			c.Next()
+			return
+		}
+
+		// Start timer
+		start := time.Now()
+		raw := c.Request.URL.RawQuery
+
+		// Process request
+		c.Next()
+
+		// Log only if not a health check endpoint
+		latency := time.Since(start)
+		clientIP := c.ClientIP()
+		method := c.Request.Method
+		statusCode := c.Writer.Status()
+
+		if raw != "" {
+			path = path + "?" + raw
+		}
+
+		log.Printf("[%s] %s %s %d %v %s",
+			clientIP,
+			method,
+			path,
+			statusCode,
+			latency,
+			c.Errors.String(),
+		)
+	}
+}
+
 func (s *Server) SetupRoutes() *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(customLogger())
 	r.Use(cors.Default())
 
 	// Health check endpoints
@@ -113,6 +154,21 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.GET("/accounts/:accountId/roles/:roleName", s.handler.GetRole)
 		api.DELETE("/accounts/:accountId/roles/:roleName", s.handler.DeleteRole)
 
+		// Load balancer routes
+		api.GET("/load-balancers", s.handler.ListAllLoadBalancers)
+		api.GET("/accounts/:accountId/load-balancers", s.handler.ListLoadBalancersByAccount)
+		api.DELETE("/accounts/:accountId/regions/:region/load-balancers", s.handler.DeleteLoadBalancer)
+
+		// VPC routes
+		api.GET("/vpcs", s.handler.ListVPCs)
+		api.GET("/accounts/:accountId/vpcs", s.handler.ListVPCsByAccount)
+		api.DELETE("/accounts/:accountId/regions/:region/vpcs/:vpcId", s.handler.DeleteVPC)
+
+		// NAT Gateway routes
+		api.GET("/nat-gateways", s.handler.ListNATGateways)
+		api.GET("/accounts/:accountId/nat-gateways", s.handler.ListNATGatewaysByAccount)
+		api.DELETE("/accounts/:accountId/regions/:region/nat-gateways/:natGatewayId", s.handler.DeleteNATGateway)
+
 		// Azure enterprise applications routes (if Azure is configured)
 		if s.azureHandler != nil {
 			azure := api.Group("/azure")
@@ -140,6 +196,10 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		api.POST("/cache/s3-buckets/invalidate", s.handler.InvalidateS3BucketsCache)
 		api.POST("/cache/roles/invalidate", s.handler.InvalidateRolesCache)
 		api.POST("/cache/accounts/:accountId/roles/invalidate", s.handler.InvalidateAccountRolesCache)
+		api.POST("/cache/load-balancers/invalidate", s.handler.InvalidateAllLoadBalancersCache)
+		api.POST("/cache/accounts/:accountId/load-balancers/invalidate", s.handler.InvalidateLoadBalancersCache)
+		api.POST("/cache/vpcs/invalidate", s.handler.InvalidateVPCsCache)
+		api.POST("/cache/nat-gateways/invalidate", s.handler.InvalidateNATGatewaysCache)
 	}
 
 	// Serve frontend

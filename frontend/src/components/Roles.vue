@@ -123,7 +123,10 @@
                 <span class="sort-indicator" v-if="sortField === 'create_date'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
               </th>
               <th>Policies</th>
-              <th>Last Used</th>
+              <th @click="sortBy('last_used_date')" class="sortable">
+                Last Used
+                <span class="sort-indicator" v-if="sortField === 'last_used_date'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
+              </th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -249,7 +252,14 @@ export default {
         let aVal = a[this.sortField]
         let bVal = b[this.sortField]
 
-        if (this.sortField === 'create_date' || this.sortField === 'last_used_date') {
+        if (this.sortField === 'create_date') {
+          aVal = new Date(aVal)
+          bVal = new Date(bVal)
+        } else if (this.sortField === 'last_used_date') {
+          // Handle null/undefined values - roles never used should be sorted to the end
+          if (!aVal && !bVal) return 0
+          if (!aVal) return 1  // a has no last used date, sort to end
+          if (!bVal) return -1 // b has no last used date, sort to end
           aVal = new Date(aVal)
           bVal = new Date(bVal)
         } else if (typeof aVal === 'string') {
@@ -351,7 +361,9 @@ export default {
 
       try {
         this.loading = true
-        const url = `/api/accounts/${role.account_id}/roles/${role.role_name}`
+        // URL encode the role name to handle special characters
+        const encodedRoleName = encodeURIComponent(role.role_name)
+        const url = `/api/accounts/${role.account_id}/roles/${encodedRoleName}`
         await axios.delete(url)
 
         // Reload data - the cache has been updated
@@ -359,9 +371,14 @@ export default {
 
         alert(`Role ${role.role_name} deleted successfully`)
       } catch (err) {
-        const errorMsg = err.response?.data?.error || 'Failed to delete role'
-        alert(`Error: ${errorMsg}`)
+        let errorMsg = 'Failed to delete role'
+        if (err.response?.data?.error) {
+          errorMsg = err.response.data.error
+        } else if (err.message) {
+          errorMsg = err.message
+        }
         console.error('Failed to delete role:', err)
+        alert(`Error deleting role "${role.role_name}":\n\n${errorMsg}\n\nPlease check:\n- The role is not in use by any services\n- The role is not attached to any instance profiles\n- You have permission to delete IAM roles`)
       } finally {
         this.loading = false
       }

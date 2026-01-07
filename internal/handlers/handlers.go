@@ -74,9 +74,9 @@ func (h *Handler) ListAllUsers(c *gin.Context) {
 
 // containsAccessDenied checks if an error message indicates access denied
 func containsAccessDenied(errMsg string) bool {
-	return 	strings.Contains(errMsg, "AccessDenied") ||
-			strings.Contains(errMsg, "assume role") ||
-			strings.Contains(errMsg, "not authorized")
+	return strings.Contains(errMsg, "AccessDenied") ||
+		strings.Contains(errMsg, "assume role") ||
+		strings.Contains(errMsg, "not authorized")
 }
 
 func (h *Handler) GetCurrentUser(c *gin.Context) {
@@ -89,9 +89,9 @@ func (h *Handler) GetCurrentUser(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"email":     user.Email,
-		"username":  user.PreferredUsername,
-		"groups":    user.Groups,
+		"email":         user.Email,
+		"username":      user.PreferredUsername,
+		"groups":        user.Groups,
 		"authenticated": true,
 	})
 }
@@ -816,4 +816,284 @@ func (h *Handler) InvalidateAccountRolesCache(c *gin.Context) {
 	}
 	h.awsService.InvalidateAccountRolesCache(accountID)
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Roles cache invalidated for account %s", accountID)})
+}
+
+// ============================================================================
+// LOAD BALANCER HANDLERS (Account-Specific)
+// ============================================================================
+
+func (h *Handler) ListAllLoadBalancers(c *gin.Context) {
+	loadBalancers, err := h.awsService.ListAllLoadBalancers()
+	if err != nil {
+		fmt.Printf("[ERROR] ListAllLoadBalancers failed: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": "Failed to list load balancers. Check AWS credentials and permissions.",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, loadBalancers)
+}
+
+func (h *Handler) ListLoadBalancersByAccount(c *gin.Context) {
+	accountID := c.Param("accountId")
+	loadBalancers, err := h.awsService.ListLoadBalancersByAccount(accountID)
+	if err != nil {
+		fmt.Printf("[ERROR] ListLoadBalancersByAccount failed for account %s: %v\n", accountID, err)
+		if containsAccessDenied(err.Error()) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":   "Access denied to account",
+				"details": fmt.Sprintf("Cannot access account %s. The role may not exist or trust relationship is not configured.", accountID),
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": fmt.Sprintf("Failed to list load balancers for account %s. Check AWS credentials and permissions.", accountID),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, loadBalancers)
+}
+
+func (h *Handler) DeleteLoadBalancer(c *gin.Context) {
+	accountID := c.Param("accountId")
+	region := c.Param("region")
+	loadBalancerArnOrName := c.Query("id") // ARN for ALB/NLB, name for Classic ELB
+	lbType := c.Query("type")              // "application", "network", or "classic"
+
+	if accountID == "" || region == "" || loadBalancerArnOrName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID, region, and load balancer id (ARN/name) are required",
+		})
+		return
+	}
+
+	if lbType == "" {
+		// Try to infer from ARN format
+		if strings.HasPrefix(loadBalancerArnOrName, "arn:aws:elasticloadbalancing") {
+			if strings.Contains(loadBalancerArnOrName, ":loadbalancer/app/") {
+				lbType = "application"
+			} else if strings.Contains(loadBalancerArnOrName, ":loadbalancer/net/") {
+				lbType = "network"
+			} else if strings.Contains(loadBalancerArnOrName, ":loadbalancer/") {
+				lbType = "classic"
+			} else {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "Cannot determine load balancer type. Please specify 'type' query parameter (application, network, or classic)",
+				})
+				return
+			}
+		} else {
+			// Assume Classic ELB if it's just a name
+			lbType = "classic"
+		}
+	}
+
+	err := h.awsService.DeleteLoadBalancer(accountID, region, loadBalancerArnOrName, lbType)
+	if err != nil {
+		fmt.Printf("[ERROR] DeleteLoadBalancer failed for %s in account %s, region %s: %v\n", loadBalancerArnOrName, accountID, region, err)
+		statusCode := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			statusCode = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "cannot access account") {
+			statusCode = http.StatusForbidden
+		}
+		c.JSON(statusCode, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("Load balancer %s deleted successfully", loadBalancerArnOrName),
+	})
+}
+
+func (h *Handler) InvalidateLoadBalancersCache(c *gin.Context) {
+	accountID := c.Param("accountId")
+	if accountID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID is required",
+		})
+		return
+	}
+	h.awsService.InvalidateLoadBalancersCache(accountID)
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Load balancers cache invalidated for account %s", accountID)})
+}
+
+func (h *Handler) InvalidateAllLoadBalancersCache(c *gin.Context) {
+	h.awsService.InvalidateAllLoadBalancersCache()
+	c.JSON(http.StatusOK, gin.H{"message": "All load balancers cache invalidated"})
+}
+
+// ============================================================================
+// VPC HANDLERS
+// ============================================================================
+
+func (h *Handler) ListVPCs(c *gin.Context) {
+	vpcs, err := h.awsService.ListVPCs()
+	if err != nil {
+		fmt.Printf("[ERROR] ListVPCs failed: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": "Failed to list VPCs. Check AWS credentials and permissions.",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, vpcs)
+}
+
+func (h *Handler) ListVPCsByAccount(c *gin.Context) {
+	accountID := c.Param("accountId")
+
+	if accountID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID is required",
+		})
+		return
+	}
+
+	vpcs, err := h.awsService.ListVPCsByAccount(accountID)
+	if err != nil {
+		fmt.Printf("[ERROR] ListVPCsByAccount failed for account %s: %v\n", accountID, err)
+		if containsAccessDenied(err.Error()) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":   "Access denied to account",
+				"details": fmt.Sprintf("Cannot access account %s.", accountID),
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": fmt.Sprintf("Failed to list VPCs for account %s.", accountID),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, vpcs)
+}
+
+func (h *Handler) DeleteVPC(c *gin.Context) {
+	accountID := c.Param("accountId")
+	region := c.Param("region")
+	vpcID := c.Param("vpcId")
+
+	if accountID == "" || region == "" || vpcID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID, region, and VPC ID are required",
+		})
+		return
+	}
+
+	err := h.awsService.DeleteVPC(accountID, region, vpcID)
+	if err != nil {
+		fmt.Printf("[ERROR] DeleteVPC failed for VPC %s in account %s, region %s: %v\n", vpcID, accountID, region, err)
+
+		statusCode := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			statusCode = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "has dependencies") || strings.Contains(err.Error(), "DependencyViolation") {
+			statusCode = http.StatusConflict
+		} else if strings.Contains(err.Error(), "cannot access account") {
+			statusCode = http.StatusForbidden
+		}
+
+		c.JSON(statusCode, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("VPC %s deleted successfully", vpcID),
+	})
+}
+
+func (h *Handler) InvalidateVPCsCache(c *gin.Context) {
+	h.awsService.InvalidateVPCsCache()
+	c.JSON(http.StatusOK, gin.H{"message": "VPCs cache invalidated successfully"})
+}
+
+// ============================================================================
+// NAT GATEWAY HANDLERS
+// ============================================================================
+
+func (h *Handler) ListNATGateways(c *gin.Context) {
+	nats, err := h.awsService.ListNATGateways()
+	if err != nil {
+		fmt.Printf("[ERROR] ListNATGateways failed: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": "Failed to list NAT Gateways. Check AWS credentials and permissions.",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, nats)
+}
+
+func (h *Handler) ListNATGatewaysByAccount(c *gin.Context) {
+	accountID := c.Param("accountId")
+
+	if accountID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID is required",
+		})
+		return
+	}
+
+	nats, err := h.awsService.ListNATGatewaysByAccount(accountID)
+	if err != nil {
+		fmt.Printf("[ERROR] ListNATGatewaysByAccount failed for account %s: %v\n", accountID, err)
+		if containsAccessDenied(err.Error()) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":   "Access denied to account",
+				"details": fmt.Sprintf("Cannot access account %s.", accountID),
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": fmt.Sprintf("Failed to list NAT Gateways for account %s.", accountID),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, nats)
+}
+
+func (h *Handler) DeleteNATGateway(c *gin.Context) {
+	accountID := c.Param("accountId")
+	region := c.Param("region")
+	natGatewayID := c.Param("natGatewayId")
+
+	if accountID == "" || region == "" || natGatewayID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID, region, and NAT Gateway ID are required",
+		})
+		return
+	}
+
+	err := h.awsService.DeleteNATGateway(accountID, region, natGatewayID)
+	if err != nil {
+		fmt.Printf("[ERROR] DeleteNATGateway failed for NAT Gateway %s in account %s, region %s: %v\n", natGatewayID, accountID, region, err)
+
+		statusCode := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			statusCode = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "cannot access account") {
+			statusCode = http.StatusForbidden
+		}
+
+		c.JSON(statusCode, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("NAT Gateway %s deleted successfully", natGatewayID),
+	})
+}
+
+func (h *Handler) InvalidateNATGatewaysCache(c *gin.Context) {
+	h.awsService.InvalidateNATGatewaysCache()
+	c.JSON(http.StatusOK, gin.H{"message": "NAT Gateways cache invalidated successfully"})
 }

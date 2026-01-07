@@ -16,6 +16,9 @@
           <router-link to="/ebs-volumes" class="nav-link">EBS Volumes</router-link>
           <router-link to="/s3-buckets" class="nav-link">S3 Buckets</router-link>
           <router-link to="/roles" class="nav-link">IAM Roles</router-link>
+          <router-link to="/load-balancers" class="nav-link">Load Balancers</router-link>
+          <router-link to="/vpcs" class="nav-link">VPCs</router-link>
+          <router-link to="/nat-gateways" class="nav-link">NAT Gateways</router-link>
           <router-link to="/azure/enterprise-apps" class="nav-link">Azure Apps</router-link>
           <button @click="toggleTheme" class="theme-btn">
             {{ isDarkTheme ? '☀️' : '🌙' }}

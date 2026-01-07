@@ -15,6 +15,28 @@
           </div>
         </div>
         <div class="header-actions">
+          <button 
+            @click="deleteAllAvailableVolumes" 
+            class="btn btn-danger" 
+            :disabled="loading || !filterAccount || availableVolumesCount === 0"
+            :title="!filterAccount ? 'Select an account first to enable bulk delete' : (availableVolumesCount === 0 ? 'No available volumes in this account' : `Delete ${availableVolumesCount} available (unused) volume(s) in ${selectedAccountName}`)"
+          >
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+            Delete All Available ({{ availableVolumesCount }})
+          </button>
+          <button 
+            @click="deleteAllOldAvailableVolumes" 
+            class="btn btn-danger" 
+            :disabled="loading || !filterAccount || oldAvailableVolumesCount === 0"
+            :title="!filterAccount ? 'Select an account first to enable bulk delete' : (oldAvailableVolumesCount === 0 ? 'No available volumes older than 6 months in this account' : `Delete ${oldAvailableVolumesCount} available volume(s) older than 6 months in ${selectedAccountName}`)"
+          >
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+            Delete Old Available ({{ oldAvailableVolumesCount }})
+          </button>
           <button @click="downloadJSON" class="btn btn-success" :disabled="loading || volumes.length === 0">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
               <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
@@ -60,6 +82,14 @@
         <div class="stat-card">
           <div class="stat-value">{{ inUseVolumes }}</div>
           <div class="stat-label">In Use</div>
+        </div>
+        <div class="stat-card stat-card-available">
+          <div class="stat-value">{{ availableVolumesCount }}</div>
+          <div class="stat-label">Available (Unused)</div>
+        </div>
+        <div class="stat-card stat-card-old-available">
+          <div class="stat-value">{{ oldAvailableVolumesCount }}</div>
+          <div class="stat-label">Available (6+ months)</div>
         </div>
         <div class="stat-card">
           <div class="stat-value">{{ totalSize }} GiB</div>
@@ -189,6 +219,7 @@
               </td>
               <td>
                 <div class="action-buttons">
+                  <!-- Available volumes: Delete button -->
                   <button
                     v-if="volume.state === 'available'"
                     @click="deleteVolume(volume)"
@@ -201,18 +232,33 @@
                     </svg>
                     Delete
                   </button>
-                  <button
-                    v-else-if="volume.state === 'in-use'"
-                    @click="detachVolume(volume)"
-                    class="action-btn action-btn-detach"
-                    :disabled="loading"
-                    title="Detach volume from instances"
-                  >
-                    <svg viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M16.5,11.5L14.5,13.5L12,11L14,9L16.5,11.5M22,12A10,10 0 0,0 12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12M20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12Z"/>
-                    </svg>
-                    Detach
-                  </button>
+                  <!-- In-use volumes: Terminate instance(s) and Delete volume buttons -->
+                  <template v-else-if="volume.state === 'in-use'">
+                    <button
+                      v-for="attachment in (volume.attachments || [])"
+                      :key="attachment.instance_id"
+                      @click="terminateInstance(volume, attachment.instance_id)"
+                      class="action-btn action-btn-terminate"
+                      :disabled="loading"
+                      :title="`Terminate instance ${attachment.instance_id}`"
+                    >
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4M11,17V16H9V14H13V13H10A1,1 0 0,1 9,12V9A1,1 0 0,1 10,8H14V10H12V11H15A1,1 0 0,1 16,12V16A1,1 0 0,1 15,17H11Z"/>
+                      </svg>
+                      Terminate {{ attachment.instance_id.substring(0, 8) }}...
+                    </button>
+                    <button
+                      @click="deleteVolume(volume)"
+                      class="action-btn action-btn-delete"
+                      :disabled="loading"
+                      title="Delete volume (will detach from instances first)"
+                    >
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                      </svg>
+                      Delete Volume
+                    </button>
+                  </template>
                   <span v-else class="no-action">-</span>
                 </div>
               </td>
@@ -255,8 +301,59 @@ export default {
     uniqueRegions() {
       return [...new Set(this.volumes.map(v => v.region))].sort()
     },
+    selectedAccountName() {
+      if (!this.filterAccount) return ''
+      const account = this.uniqueAccounts.find(a => a.id === this.filterAccount)
+      return account ? account.name : this.filterAccount
+    },
     inUseVolumes() {
       return this.volumes.filter(v => v.state === 'in-use').length
+    },
+    availableVolumesCount() {
+      // If account filter is set, only count volumes from that account
+      let volumesToCheck = this.volumes
+      if (this.filterAccount) {
+        volumesToCheck = volumesToCheck.filter(v => v.account_id === this.filterAccount)
+      }
+      return volumesToCheck.filter(v => v.state === 'available').length
+    },
+    availableVolumes() {
+      // Get all available volumes, optionally filtered by account
+      let volumesToCheck = this.volumes
+      if (this.filterAccount) {
+        volumesToCheck = volumesToCheck.filter(v => v.account_id === this.filterAccount)
+      }
+      return volumesToCheck.filter(v => v.state === 'available')
+    },
+    oldAvailableVolumesCount() {
+      // Count available volumes older than 6 months, optionally filtered by account
+      let volumesToCheck = this.volumes
+      if (this.filterAccount) {
+        volumesToCheck = volumesToCheck.filter(v => v.account_id === this.filterAccount)
+      }
+      const sixMonthsAgo = new Date()
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+      return volumesToCheck.filter(v => {
+        if (v.state !== 'available') return false
+        if (!v.create_time) return false
+        const createdDate = new Date(v.create_time)
+        return createdDate < sixMonthsAgo
+      }).length
+    },
+    oldAvailableVolumes() {
+      // Get available volumes older than 6 months, optionally filtered by account
+      let volumesToCheck = this.volumes
+      if (this.filterAccount) {
+        volumesToCheck = volumesToCheck.filter(v => v.account_id === this.filterAccount)
+      }
+      const sixMonthsAgo = new Date()
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+      return volumesToCheck.filter(v => {
+        if (v.state !== 'available') return false
+        if (!v.create_time) return false
+        const createdDate = new Date(v.create_time)
+        return createdDate < sixMonthsAgo
+      })
     },
     totalSize() {
       return this.volumes.reduce((sum, v) => sum + v.size, 0)
@@ -376,12 +473,19 @@ export default {
       }
     },
     async deleteVolume(volume) {
-      const confirmed = confirm(
-        `Are you sure you want to delete volume ${volume.volume_id}?\n\n` +
+      let confirmMessage = `Are you sure you want to delete volume ${volume.volume_id}?\n\n` +
         `Size: ${volume.size} GiB\n` +
-        `Type: ${volume.volume_type}\n\n` +
-        `WARNING: This action cannot be undone.`
-      )
+        `Type: ${volume.volume_type}\n\n`
+      
+      if (volume.state === 'in-use' && volume.attachments && volume.attachments.length > 0) {
+        confirmMessage += `WARNING: This volume is attached to:\n` +
+          volume.attachments.map(att => `  - Instance: ${att.instance_id} (${att.device})`).join('\n') +
+          `\n\nThe volume will be detached first, then deleted.\n\n`
+      }
+      
+      confirmMessage += `WARNING: This action cannot be undone.`
+      
+      const confirmed = confirm(confirmMessage)
       if (!confirmed) return
 
       try {
@@ -400,6 +504,184 @@ export default {
       } finally {
         this.loading = false
       }
+    },
+    async terminateInstance(volume, instanceId) {
+      const confirmed = confirm(
+        `Are you sure you want to terminate instance ${instanceId}?\n\n` +
+        `This instance is attached to volume ${volume.volume_id}.\n\n` +
+        `WARNING: Terminating the instance will:\n` +
+        `- Stop and terminate the EC2 instance\n` +
+        `- Detach the volume automatically\n` +
+        `- This action cannot be undone\n\n` +
+        `After termination, you can delete the volume separately.`
+      )
+      if (!confirmed) return
+
+      try {
+        this.loading = true
+        const url = `/api/accounts/${volume.account_id}/regions/${volume.region}/instances/${instanceId}/terminate`
+        await axios.post(url)
+
+        // Reload data - the cache has been updated
+        await this.loadData()
+
+        alert(`Instance ${instanceId} terminated successfully`)
+      } catch (err) {
+        const errorMsg = err.response?.data?.error || 'Failed to terminate instance'
+        alert(`Error: ${errorMsg}`)
+        console.error('Failed to terminate instance:', err)
+      } finally {
+        this.loading = false
+      }
+    },
+    async deleteAllAvailableVolumes() {
+      const availableVols = this.availableVolumes
+      if (availableVols.length === 0) {
+        alert('No available volumes to delete')
+        return
+      }
+
+      const accountFilter = this.filterAccount
+      const accountName = accountFilter 
+        ? this.volumes.find(v => v.account_id === accountFilter)?.account_name || accountFilter
+        : 'all accounts'
+
+      const totalSize = availableVols.reduce((sum, v) => sum + v.size, 0)
+      const volumesList = availableVols.slice(0, 10).map(v => `  - ${v.volume_id} (${v.size} GiB, ${v.region})`).join('\n')
+      const moreText = availableVols.length > 10 ? `\n  ... and ${availableVols.length - 10} more` : ''
+
+      const confirmed = confirm(
+        `Are you sure you want to delete ALL ${availableVols.length} available volume(s)?\n\n` +
+        `Account: ${accountName}\n` +
+        `Total size: ${totalSize} GiB\n\n` +
+        `Volumes to delete:\n${volumesList}${moreText}\n\n` +
+        `WARNING: This action cannot be undone!\n` +
+        `This will permanently delete all available volumes${accountFilter ? ' in this account' : ' across all accounts'}.`
+      )
+      if (!confirmed) return
+
+      try {
+        this.loading = true
+        let successCount = 0
+        let failCount = 0
+        const errors = []
+
+        // Delete volumes one by one
+        for (const volume of availableVols) {
+          try {
+            const url = `/api/accounts/${volume.account_id}/regions/${volume.region}/volumes/${volume.volume_id}`
+            await axios.delete(url)
+            successCount++
+            
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 100))
+          } catch (err) {
+            failCount++
+            const errorMsg = err.response?.data?.error || err.message || 'Unknown error'
+            errors.push(`${volume.volume_id}: ${errorMsg}`)
+            console.error(`Failed to delete volume ${volume.volume_id}:`, err)
+          }
+        }
+
+        // Reload data
+        await this.loadData()
+
+        // Show results
+        let message = `Deleted ${successCount} volume(s) successfully`
+        if (failCount > 0) {
+          message += `\n\nFailed to delete ${failCount} volume(s):\n${errors.slice(0, 5).join('\n')}`
+          if (errors.length > 5) {
+            message += `\n... and ${errors.length - 5} more errors (check console)`
+          }
+        }
+        alert(message)
+      } catch (err) {
+        const errorMsg = err.response?.data?.error || 'Failed to delete volumes'
+        alert(`Error: ${errorMsg}`)
+        console.error('Failed to delete volumes:', err)
+      } finally {
+        this.loading = false
+      }
+    },
+    async deleteAllOldAvailableVolumes() {
+      const oldAvailableVols = this.oldAvailableVolumes
+      if (oldAvailableVols.length === 0) {
+        alert('No available volumes older than 6 months to delete')
+        return
+      }
+
+      const accountFilter = this.filterAccount
+      const accountName = accountFilter 
+        ? this.volumes.find(v => v.account_id === accountFilter)?.account_name || accountFilter
+        : 'all accounts'
+
+      const totalSize = oldAvailableVols.reduce((sum, v) => sum + v.size, 0)
+      const volumesList = oldAvailableVols.slice(0, 10).map(v => {
+        const age = this.getAgeInMonths(v.create_time)
+        return `  - ${v.volume_id} (${v.size} GiB, ${v.region}, ${age} months old)`
+      }).join('\n')
+      const moreText = oldAvailableVols.length > 10 ? `\n  ... and ${oldAvailableVols.length - 10} more` : ''
+
+      const confirmed = confirm(
+        `Are you sure you want to delete ALL ${oldAvailableVols.length} available volume(s) older than 6 months?\n\n` +
+        `Account: ${accountName}\n` +
+        `Total size: ${totalSize} GiB\n\n` +
+        `Volumes to delete:\n${volumesList}${moreText}\n\n` +
+        `WARNING: This action cannot be undone!\n` +
+        `This will permanently delete all available volumes older than 6 months${accountFilter ? ' in this account' : ' across all accounts'}.`
+      )
+      if (!confirmed) return
+
+      try {
+        this.loading = true
+        let successCount = 0
+        let failCount = 0
+        const errors = []
+
+        // Delete volumes one by one
+        for (const volume of oldAvailableVols) {
+          try {
+            const url = `/api/accounts/${volume.account_id}/regions/${volume.region}/volumes/${volume.volume_id}`
+            await axios.delete(url)
+            successCount++
+            
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 100))
+          } catch (err) {
+            failCount++
+            const errorMsg = err.response?.data?.error || err.message || 'Unknown error'
+            errors.push(`${volume.volume_id}: ${errorMsg}`)
+            console.error(`Failed to delete volume ${volume.volume_id}:`, err)
+          }
+        }
+
+        // Reload data
+        await this.loadData()
+
+        // Show results
+        let message = `Deleted ${successCount} volume(s) successfully`
+        if (failCount > 0) {
+          message += `\n\nFailed to delete ${failCount} volume(s):\n${errors.slice(0, 5).join('\n')}`
+          if (errors.length > 5) {
+            message += `\n... and ${errors.length - 5} more errors (check console)`
+          }
+        }
+        alert(message)
+      } catch (err) {
+        const errorMsg = err.response?.data?.error || 'Failed to delete volumes'
+        alert(`Error: ${errorMsg}`)
+        console.error('Failed to delete volumes:', err)
+      } finally {
+        this.loading = false
+      }
+    },
+    getAgeInMonths(createdTime) {
+      if (!createdTime) return 0
+      const now = new Date()
+      const created = new Date(createdTime)
+      const diffTime = Math.abs(now - created)
+      const diffMonths = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 30))
+      return diffMonths
     },
     downloadJSON() {
       try {
@@ -572,6 +854,16 @@ export default {
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
+.btn-danger {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+}
+
 .loading-container {
   background: var(--color-bg-primary);
   border-radius: 12px;
@@ -663,6 +955,24 @@ export default {
   font-size: 0.9rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.stat-card-available {
+  border: 2px solid rgba(16, 185, 129, 0.3);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(16, 185, 129, 0.02) 100%);
+}
+
+.stat-card-available .stat-value {
+  color: #10b981;
+}
+
+.stat-card-old-available {
+  border: 2px solid rgba(239, 68, 68, 0.3);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.05) 0%, rgba(239, 68, 68, 0.02) 100%);
+}
+
+.stat-card-old-available .stat-value {
+  color: #ef4444;
 }
 
 .filters {
@@ -940,6 +1250,16 @@ export default {
 .action-btn-detach:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+}
+
+.action-btn-terminate {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+}
+
+.action-btn-terminate:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
 }
 
 .action-btn-delete {
