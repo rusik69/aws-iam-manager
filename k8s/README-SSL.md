@@ -48,7 +48,6 @@ make deploy HOST=aws-manager.mydomain.org
 **Important**: The HOST variable will be used for:
 - SSL certificate domain validation
 - Ingress host routing
-- OAuth2 redirect URL configuration
 
 ## SSL Certificate Process
 
@@ -113,4 +112,4 @@ For testing, use the staging issuer to avoid rate limits:
 - Certificates auto-renew 15 days before expiry
 - HTTP traffic is automatically redirected to HTTPS
 - HTTPS is enforced for all routes
-- OAuth2 authentication still applies over SSL
+- Application authentication (admin username/password) applies over SSL

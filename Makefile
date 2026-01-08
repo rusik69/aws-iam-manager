@@ -159,7 +159,23 @@ dev:
 		 docker build --no-cache --network=host -t aws-iam-manager:dev .)
 	@echo "☸️  Deploying to Kubernetes cluster..."
 	@kubectl apply -f k8s/namespace.yaml
-	@kubectl create secret generic app-secrets --namespace=aws-iam-manager \
+	@echo "🔐 Generating admin password..."
+	@if ! grep -q "^ADMIN_PASSWORD=" .env.prod 2>/dev/null || [ -z "$$(grep '^ADMIN_PASSWORD=' .env.prod | cut -d'=' -f2)" ]; then \
+		ADMIN_PASSWORD=$$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); \
+		echo "✅ Generated random admin password (stored in .env.prod)"; \
+		if grep -q "^ADMIN_PASSWORD=" .env.prod 2>/dev/null; then \
+			sed -i.bak "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$$ADMIN_PASSWORD|" .env.prod; \
+		else \
+			echo "ADMIN_PASSWORD=$$ADMIN_PASSWORD" >> .env.prod; \
+		fi; \
+		if ! grep -q "^ADMIN_USERNAME=" .env.prod 2>/dev/null; then \
+			echo "ADMIN_USERNAME=admin" >> .env.prod; \
+		fi; \
+	else \
+		echo "✅ Using existing admin password from .env.prod"; \
+	fi; \
+	ADMIN_USERNAME=$$(grep '^ADMIN_USERNAME=' .env.prod 2>/dev/null | cut -d'=' -f2 || echo "admin"); \
+	kubectl create secret generic app-secrets --namespace=aws-iam-manager \
 		--from-env-file=.env.prod \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@kubectl apply -f k8s/configmap.yaml
@@ -171,6 +187,11 @@ dev:
 	@echo "⏳ Waiting for deployment to be ready..."
 	@kubectl rollout status deployment/aws-iam-manager -n aws-iam-manager --timeout=120s
 	@echo "✅ Deployment ready!"
+	@echo ""
+	@ADMIN_USERNAME=$$(grep '^ADMIN_USERNAME=' .env.prod 2>/dev/null | cut -d'=' -f2 || echo "admin"); \
+	echo "🔐 Admin credentials configured (username: $$ADMIN_USERNAME)"
+	@echo "   Password stored in .env.prod file (not displayed for security)"
+	@echo ""
 	@echo "💡 Access the app at http://localhost:8080"
 	@echo "🔌 Starting port-forward and showing logs (Ctrl+C to stop)..."
 	@trap 'kill 0' INT TERM; \
@@ -569,20 +590,29 @@ deploy:
 		echo "⚠️  No .env.prod found, creating from .env.example"; \
 		scp .env.example $(TARGET_HOST):~/aws-iam-manager/k8s/.env; \
 	fi
-	@scp -r oauth2-proxy $(TARGET_HOST):~/aws-iam-manager/
 	@echo "☸️  Configuring secrets and deploying to Kubernetes..."
 	@ssh $(TARGET_HOST) 'cd ~/aws-iam-manager && \
-		echo "🔧 Setting OAuth2 redirect URL for host $(HOST)..." && \
-		sed -i.bak "s|OAUTH2_REDIRECT_URL=.*|OAUTH2_REDIRECT_URL=http://$(HOST)/oauth2/callback|" k8s/.env && \
+		echo "🔐 Generating admin password..." && \
+		if ! grep -q "^ADMIN_PASSWORD=" k8s/.env 2>/dev/null || [ -z "$$(grep '\''^ADMIN_PASSWORD='\'' k8s/.env | cut -d'\''='\'' -f2)" ]; then \
+			ADMIN_PASSWORD=$$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); \
+			echo "✅ Generated random admin password (stored in k8s/.env)"; \
+			if grep -q "^ADMIN_PASSWORD=" k8s/.env 2>/dev/null; then \
+				sed -i.bak "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$$ADMIN_PASSWORD|" k8s/.env; \
+			else \
+				echo "ADMIN_PASSWORD=$$ADMIN_PASSWORD" >> k8s/.env; \
+			fi; \
+			if ! grep -q "^ADMIN_USERNAME=" k8s/.env 2>/dev/null; then \
+				echo "ADMIN_USERNAME=admin" >> k8s/.env; \
+			fi; \
+		else \
+			echo "✅ Using existing admin password from k8s/.env"; \
+		fi; \
+		ADMIN_USERNAME=$$(grep '\''^ADMIN_USERNAME='\'' k8s/.env 2>/dev/null | cut -d'\''='\'' -f2 || echo "admin"); \
 		echo "☸️  Creating namespace first..." && \
 		kubectl apply -f k8s/namespace.yaml && \
 		echo "🔐 Creating Kubernetes secrets from environment file..." && \
 		kubectl create secret generic app-secrets --namespace=aws-iam-manager \
 			--from-env-file=k8s/.env \
-			--dry-run=client -o yaml | kubectl apply -f - && \
-		echo "📝 Updating ConfigMap with authenticated emails..." && \
-		kubectl create configmap oauth2-proxy-config --namespace=aws-iam-manager \
-			--from-file=authenticated-emails.txt=oauth2-proxy/authenticated-emails.txt \
 			--dry-run=client -o yaml | kubectl apply -f - && \
 		echo "☸️  Applying cert-manager configuration..." && \
 		kubectl apply -f k8s/cert-manager.yaml && \
@@ -593,15 +623,20 @@ deploy:
 		echo "☸️  Applying remaining Kubernetes manifests..." && \
 		kubectl apply -f k8s/configmap.yaml && \
 		kubectl apply -f k8s/app-deployment.yaml && \
-		kubectl apply -f k8s/oauth2-proxy-deployment.yaml && \
 		kubectl apply -f k8s/service.yaml'
 	@echo "✅ Application deployed successfully to Kubernetes cluster on $(TARGET_HOST)"
+	@echo ""
+	@echo "🔐 Admin credentials configured"
+	@ssh $(TARGET_HOST) 'cd ~/aws-iam-manager && \
+		ADMIN_USERNAME=$$(grep '\''^ADMIN_USERNAME='\'' k8s/.env 2>/dev/null | cut -d'\''='\'' -f2 || echo "admin"); \
+		echo "  Username: $$ADMIN_USERNAME"; \
+		echo "  Password stored in k8s/.env file (not displayed for security)"'
 	@echo ""
 	@echo "🌐 External Access Information:"
 	@echo "  📍 HTTPS Access (Port 443): https://$(HOST)"
 	@echo "  📍 HTTP Access (Port 80): http://$(HOST) (redirects to HTTPS)"
 	@echo "  📍 Via Nginx Ingress Controller with Let's Encrypt SSL"
-	@echo "  📍 Traffic flows: Internet → Ingress (SSL termination) → oauth2-proxy service → oauth2-proxy pod → backend"
+	@echo "  📍 Traffic flows: Internet → Ingress (SSL termination) → aws-iam-manager service → backend"
 	@echo ""
 	@echo "🔍 Checking deployment status..."
 	@ssh $(TARGET_HOST) 'kubectl get pods -n aws-iam-manager && kubectl get services -n aws-iam-manager && kubectl get ingress -n aws-iam-manager && kubectl get certificates -n aws-iam-manager'
@@ -615,7 +650,7 @@ deploy:
 	@echo "   • Primary: https://$(HOST) (HTTPS with Let's Encrypt SSL)"
 	@echo "   • Fallback: http://$(HOST) (redirects to HTTPS)"
 	@echo "   • Requires: Nginx Ingress Controller + cert-manager"
-	@echo "   • OAuth2 authentication is handled by oauth2-proxy"
+	@echo "   • Authentication is handled by the application (admin username/password)"
 	@echo "   • Make sure ports 80 and 443 are open in your firewall/security groups"
 
 # Validate production environment file
@@ -629,19 +664,9 @@ validate-prod-env:
 	fi
 	@echo "✅ .env.prod exists"
 	@echo "🔍 Checking required variables..."
-	@if ! grep -q "^OAUTH2_CLIENT_ID=" .env.prod || grep -q "^OAUTH2_CLIENT_ID=$$" .env.prod; then \
-		echo "❌ OAUTH2_CLIENT_ID not set in .env.prod"; \
-		exit 1; \
+	@if ! grep -q "^ADMIN_PASSWORD=" .env.prod || grep -q "^ADMIN_PASSWORD=$$" .env.prod; then \
+		echo "⚠️  ADMIN_PASSWORD not set in .env.prod (will be auto-generated)"; \
 	fi
-	@if ! grep -q "^OAUTH2_CLIENT_SECRET=" .env.prod || grep -q "^OAUTH2_CLIENT_SECRET=$$" .env.prod; then \
-		echo "❌ OAUTH2_CLIENT_SECRET not set in .env.prod"; \
-		exit 1; \
-	fi
-	@if ! grep -q "^OAUTH2_COOKIE_SECRET=" .env.prod || grep -q "^OAUTH2_COOKIE_SECRET=$$" .env.prod; then \
-		echo "❌ OAUTH2_COOKIE_SECRET not set in .env.prod"; \
-		exit 1; \
-	fi
-	@echo "✅ All required OAuth2 variables are set"
 	@echo "✅ Production environment validation passed"
 
 # ============================================================================

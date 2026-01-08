@@ -1,90 +1,156 @@
 package middleware
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"log"
 	"net/http"
-	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-// OAuth2User represents the authenticated user information from OAuth2 Proxy
-type OAuth2User struct {
-	Email             string
-	PreferredUsername string
-	Groups            []string
-	AccessToken       string
+// Session represents an authenticated session
+type Session struct {
+	Username  string
+	ExpiresAt time.Time
 }
 
-// OAuth2Middleware handles authentication via OAuth2 Proxy headers
-func OAuth2Middleware() gin.HandlerFunc {
+// SessionStore manages active sessions
+type SessionStore struct {
+	sessions map[string]*Session
+	mu       sync.RWMutex
+}
+
+var globalSessionStore = &SessionStore{
+	sessions: make(map[string]*Session),
+}
+
+// GetSessionStore returns the global session store
+func GetSessionStore() *SessionStore {
+	return globalSessionStore
+}
+
+// CleanupExpiredSessions removes expired sessions periodically
+func init() {
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			globalSessionStore.Cleanup()
+		}
+	}()
+}
+
+// GenerateSessionID generates a random session ID
+func GenerateSessionID() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+// SetSession creates a new session
+func (s *SessionStore) SetSession(sessionID string, username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[sessionID] = &Session{
+		Username:  username,
+		ExpiresAt: time.Now().Add(24 * time.Hour), // 24 hour expiration
+	}
+}
+
+// GetSession retrieves a session by ID
+func (s *SessionStore) GetSession(sessionID string) (*Session, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return nil, false
+	}
+	if time.Now().After(session.ExpiresAt) {
+		return nil, false
+	}
+	return session, true
+}
+
+// DeleteSession removes a session
+func (s *SessionStore) DeleteSession(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, sessionID)
+}
+
+// Cleanup removes expired sessions
+func (s *SessionStore) Cleanup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for id, session := range s.sessions {
+		if now.After(session.ExpiresAt) {
+			delete(s.sessions, id)
+		}
+	}
+}
+
+// AuthMiddleware handles session-based authentication
+func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Skip authentication for health check endpoints
-		if isHealthCheckEndpoint(c.Request.URL.Path) {
+		// Skip authentication for health check and auth endpoints
+		path := c.Request.URL.Path
+		if isPublicEndpoint(path) {
 			c.Next()
 			return
 		}
 
-		// Check if user is authenticated by OAuth2 Proxy
-		email := c.GetHeader("X-Auth-Request-Email")
-		if email == "" {
-			log.Printf("[WARNING] Missing X-Auth-Request-Email header for path: %s", c.Request.URL.Path)
+		// Check for session cookie
+		sessionID, err := c.Cookie("session_id")
+		if err != nil || sessionID == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Authentication required",
-				"message": "Please authenticate through OAuth2 proxy",
+				"error":   "Authentication required",
+				"message": "Please log in to access this resource",
 			})
 			c.Abort()
 			return
 		}
 
-		// Extract user information from headers
-		user := OAuth2User{
-			Email:             email,
-			PreferredUsername: c.GetHeader("X-Auth-Request-Preferred-Username"),
-			AccessToken:       c.GetHeader("X-Auth-Request-Access-Token"),
+		// Validate session
+		session, exists := globalSessionStore.GetSession(sessionID)
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error":   "Invalid session",
+				"message": "Your session has expired. Please log in again",
+			})
+			c.Abort()
+			return
 		}
 
-		// Parse groups if available
-		groupsHeader := c.GetHeader("X-Auth-Request-Groups")
-		if groupsHeader != "" {
-			user.Groups = strings.Split(groupsHeader, ",")
-			// Trim whitespace from group names
-			for i, group := range user.Groups {
-				user.Groups[i] = strings.TrimSpace(group)
-			}
-		}
+		// Store user information in context
+		c.Set("username", session.Username)
+		c.Set("authenticated", true)
 
-		// Log authentication for audit purposes
-		log.Printf("[INFO] Authenticated user: %s (username: %s) accessing: %s %s",
-			user.Email, user.PreferredUsername, c.Request.Method, c.Request.URL.Path)
-
-		// Store user information in context for use by handlers
-		c.Set("oauth2_user", user)
-		c.Set("user_email", user.Email)
-		c.Set("user_username", user.PreferredUsername)
-		c.Set("user_groups", user.Groups)
+		log.Printf("[INFO] Authenticated user: %s accessing: %s %s",
+			session.Username, c.Request.Method, path)
 
 		c.Next()
 	}
 }
 
-// isHealthCheckEndpoint checks if the path is a health check endpoint that should skip auth
-func isHealthCheckEndpoint(path string) bool {
-	healthEndpoints := []string{
+// isPublicEndpoint checks if the path is a public endpoint that should skip auth
+func isPublicEndpoint(path string) bool {
+	publicEndpoints := []string{
 		"/ping",
 		"/health",
 		"/ready",
 		"/healthz",
 		"/livez",
-		"/oauth2/callback",
-		"/oauth2/start",
-		"/oauth2/sign_in",
-		"/oauth2/sign_out",
-		"/oauth2/auth",
+		"/api/auth/login",
+		"/api/auth/logout",
+		"/api/auth/check",
 	}
 
-	for _, endpoint := range healthEndpoints {
-		if path == endpoint || strings.HasPrefix(path, "/oauth2/") {
+	for _, endpoint := range publicEndpoints {
+		if path == endpoint {
 			return true
 		}
 	}
@@ -93,76 +159,20 @@ func isHealthCheckEndpoint(path string) bool {
 }
 
 // GetCurrentUser retrieves the current authenticated user from the Gin context
-func GetCurrentUser(c *gin.Context) (*OAuth2User, bool) {
-	user, exists := c.Get("oauth2_user")
+func GetCurrentUser(c *gin.Context) (string, bool) {
+	username, exists := c.Get("username")
 	if !exists {
-		return nil, false
+		return "", false
 	}
-
-	oauth2User, ok := user.(OAuth2User)
-	return &oauth2User, ok
+	usernameStr, ok := username.(string)
+	return usernameStr, ok
 }
 
-// RequireGroup middleware ensures the user belongs to at least one of the specified groups
-func RequireGroup(allowedGroups ...string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		user, exists := GetCurrentUser(c)
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Authentication required",
-			})
-			c.Abort()
-			return
-		}
-
-		// Check if user belongs to any of the allowed groups
-		for _, userGroup := range user.Groups {
-			for _, allowedGroup := range allowedGroups {
-				if userGroup == allowedGroup {
-					c.Next()
-					return
-				}
-			}
-		}
-
-		log.Printf("[WARNING] User %s denied access - not in required groups: %v (user groups: %v)",
-			user.Email, allowedGroups, user.Groups)
-
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Insufficient permissions",
-			"message": "You do not have permission to access this resource",
-		})
-		c.Abort()
+// IsAuthenticated checks if the user is authenticated
+func IsAuthenticated(c *gin.Context) bool {
+	authenticated, exists := c.Get("authenticated")
+	if !exists {
+		return false
 	}
-}
-
-// RequireEmail middleware ensures the user's email is in the allowed list
-func RequireEmail(allowedEmails ...string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		user, exists := GetCurrentUser(c)
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Authentication required",
-			})
-			c.Abort()
-			return
-		}
-
-		// Check if user email is in the allowed list
-		for _, allowedEmail := range allowedEmails {
-			if user.Email == allowedEmail {
-				c.Next()
-				return
-			}
-		}
-
-		log.Printf("[WARNING] User %s denied access - email not in allowed list: %v",
-			user.Email, allowedEmails)
-
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Insufficient permissions",
-			"message": "Your email address is not authorized to access this resource",
-		})
-		c.Abort()
-	}
+	return authenticated.(bool)
 }

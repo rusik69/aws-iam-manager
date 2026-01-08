@@ -1,6 +1,0 @@
-# Add authorized email addresses, one per line
-# Example:
-# user@example.com
-# admin@company.com
-
-# Add your authorized users below:

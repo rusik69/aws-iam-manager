@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rusik69/aws-iam-manager/internal/models"
 
@@ -59,6 +60,12 @@ func (s *AWSService) ListUsers(accountID string) ([]models.User, error) {
 			passwordSet = true
 		}
 
+		// Get password last used date
+		var passwordLastUsed *time.Time
+		if user.PasswordLastUsed != nil {
+			passwordLastUsed = user.PasswordLastUsed
+		}
+
 		// Get access keys
 		accessKeys, err := s.getAccessKeysForUser(iamClient, user.UserName)
 		if err != nil {
@@ -67,12 +74,13 @@ func (s *AWSService) ListUsers(accountID string) ([]models.User, error) {
 		}
 
 		users = append(users, models.User{
-			Username:    *user.UserName,
-			UserID:      *user.UserId,
-			Arn:         *user.Arn,
-			CreateDate:  *user.CreateDate,
-			PasswordSet: passwordSet,
-			AccessKeys:  accessKeys,
+			Username:         *user.UserName,
+			UserID:           *user.UserId,
+			Arn:              *user.Arn,
+			CreateDate:       *user.CreateDate,
+			PasswordSet:      passwordSet,
+			PasswordLastUsed: passwordLastUsed,
+			AccessKeys:       accessKeys,
 		})
 		}
 
@@ -208,11 +216,17 @@ func (s *AWSService) GetUser(accountID, username string) (*models.User, error) {
 
 	// Check if user has password
 	passwordSet := false
+	var passwordLastUsed *time.Time
 	_, err = iamClient.GetLoginProfile(&iam.GetLoginProfileInput{
 		UserName: user.UserName,
 	})
 	if err == nil {
 		passwordSet = true
+	}
+
+	// Get password last used date
+	if user.PasswordLastUsed != nil {
+		passwordLastUsed = user.PasswordLastUsed
 	}
 
 	// Get access keys
@@ -223,12 +237,13 @@ func (s *AWSService) GetUser(accountID, username string) (*models.User, error) {
 	}
 
 	userResponse := &models.User{
-		Username:    *user.UserName,
-		UserID:      *user.UserId,
-		Arn:         *user.Arn,
-		CreateDate:  *user.CreateDate,
-		PasswordSet: passwordSet,
-		AccessKeys:  accessKeys,
+		Username:         *user.UserName,
+		UserID:           *user.UserId,
+		Arn:              *user.Arn,
+		CreateDate:       *user.CreateDate,
+		PasswordSet:      passwordSet,
+		PasswordLastUsed: passwordLastUsed,
+		AccessKeys:       accessKeys,
 	}
 
 	// Cache the result
@@ -672,4 +687,59 @@ func (s *AWSService) getAccessKeysForUser(iamClient *iam.IAM, userName *string) 
 	}
 
 	return accessKeys, nil
+}
+
+// DeleteInactiveUsers deletes users that have been inactive for 6+ months
+// A user is considered inactive if:
+// - PasswordLastUsed is nil or older than 6 months, AND
+// - All active access keys have LastUsedDate nil or older than 6 months
+func (s *AWSService) DeleteInactiveUsers(accountID string) ([]string, []string, error) {
+	sixMonthsAgo := time.Now().AddDate(0, -6, 0)
+	
+	users, err := s.ListUsers(accountID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list users: %w", err)
+	}
+
+	var deletedUsers []string
+	var failedUsers []string
+
+	for _, user := range users {
+		// Check if user is inactive
+		isInactive := true
+
+		// Check password last used - if password was used recently, user is active
+		if user.PasswordSet && user.PasswordLastUsed != nil {
+			if user.PasswordLastUsed.After(sixMonthsAgo) {
+				isInactive = false
+				continue
+			}
+		}
+
+		// Check access keys last used - if any active key was used recently, user is active
+		if len(user.AccessKeys) > 0 {
+			for _, key := range user.AccessKeys {
+				if key.Status == "Active" {
+					// If key was used recently, user is active
+					if key.LastUsedDate != nil && key.LastUsedDate.After(sixMonthsAgo) {
+						isInactive = false
+						break
+					}
+				}
+			}
+			// If user has active keys but none were used recently (or never used), they're still inactive
+		}
+
+		// If user is inactive, delete them
+		if isInactive {
+			err := s.DeleteUser(accountID, user.Username)
+			if err != nil {
+				failedUsers = append(failedUsers, fmt.Sprintf("%s: %v", user.Username, err))
+			} else {
+				deletedUsers = append(deletedUsers, user.Username)
+			}
+		}
+	}
+
+	return deletedUsers, failedUsers, nil
 }

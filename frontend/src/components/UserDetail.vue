@@ -470,30 +470,6 @@ export default {
       if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`
       return `${Math.floor(diffDays / 365)} years ago`
     },
-    async deleteUser() {
-      const confirmMessage = `Are you sure you want to DELETE the user "${this.username}"?\n\nThis will:\n1. Delete all access keys for this user\n2. Delete the user's login profile (if exists)\n3. Permanently delete the user\n\nThis action cannot be undone!`
-      
-      if (!confirm(confirmMessage)) return
-      
-      // Second confirmation for safety
-      const finalConfirmation = confirm(`FINAL CONFIRMATION:\nType "DELETE" to confirm deletion of user "${this.username}"`)
-      if (!finalConfirmation) return
-      
-      this.deletingUser = true
-      
-      try {
-        await axios.delete(`/api/accounts/${this.accountId}/users/${this.username}`)
-        alert(`User "${this.username}" has been successfully deleted.`)
-        // Navigate back to main page
-        this.$router.push('/')
-      } catch (error) {
-        console.error('Failed to delete user:', error)
-        alert(error.response?.data?.error || 'Failed to delete user. Please try again.')
-      } finally {
-        this.deletingUser = false
-      }
-    },
-    
     copyToClipboard(text) {
       if (navigator.clipboard) {
         navigator.clipboard.writeText(text).then(() => {
@@ -561,10 +537,6 @@ export default {
       const confirmMessage = `Are you sure you want to DELETE the user "${this.username}"?\n\nThis will:\n1. Delete all access keys for this user\n2. Delete the user's login profile (if exists)\n3. Permanently delete the user\n\nThis action cannot be undone!`
       
       if (!confirm(confirmMessage)) return
-      
-      // Second confirmation for safety
-      const finalConfirmation = confirm(`FINAL CONFIRMATION:\nType "DELETE" to confirm deletion of user "${this.username}"`)
-      if (!finalConfirmation) return
       
       this.deletingUser = true
       

@@ -1,25 +1,6 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: oauth2-proxy
-  namespace: aws-iam-manager
-  labels:
-    app.kubernetes.io/name: oauth2-proxy
-    app.kubernetes.io/component: proxy
-spec:
-  ports:
-  - port: 80
-    targetPort: 4180
-    protocol: TCP
-    name: http
-  selector:
-    app.kubernetes.io/name: oauth2-proxy
-    app.kubernetes.io/component: proxy
-  type: ClusterIP
----
-apiVersion: v1
-kind: Service
-metadata:
   name: aws-iam-manager
   namespace: aws-iam-manager
   labels:

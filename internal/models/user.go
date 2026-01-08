@@ -12,12 +12,13 @@ type Account struct {
 
 // User represents an AWS IAM user
 type User struct {
-	Username    string      `json:"username"`
-	UserID      string      `json:"user_id"`
-	Arn         string      `json:"arn"`
-	CreateDate  time.Time   `json:"create_date"`
-	PasswordSet bool        `json:"password_set"`
-	AccessKeys  []AccessKey `json:"access_keys"`
+	Username        string      `json:"username"`
+	UserID          string      `json:"user_id"`
+	Arn             string      `json:"arn"`
+	CreateDate      time.Time   `json:"create_date"`
+	PasswordSet     bool        `json:"password_set"`
+	PasswordLastUsed *time.Time `json:"password_last_used,omitempty"`
+	AccessKeys      []AccessKey `json:"access_keys"`
 }
 
 // UserWithAccount represents an AWS IAM user with account information

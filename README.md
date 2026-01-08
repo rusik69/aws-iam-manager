@@ -85,10 +85,7 @@ cd aws-iam-manager
 cp .env.example .env
 # Edit .env with your AWS credentials
 
-# 3. (Optional) Setup OAuth2 Proxy for SSO
-./scripts/setup-oauth2.sh
-
-# 4. Build and run
+# 3. Build and run
 docker-compose up --build
 ```
 

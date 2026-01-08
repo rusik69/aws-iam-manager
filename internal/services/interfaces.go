@@ -17,6 +17,7 @@ type AWSServiceInterface interface {
 	DeleteUser(accountID, username string) error
 	DeleteUserPassword(accountID, username string) error
 	RotateUserPassword(accountID, username string) (map[string]any, error)
+	DeleteInactiveUsers(accountID string) ([]string, []string, error)
 	ListPublicIPs() ([]models.PublicIP, error)
 	ListSecurityGroups() ([]models.SecurityGroup, error)
 	ListSecurityGroupsByAccount(accountID string) ([]models.SecurityGroup, error)

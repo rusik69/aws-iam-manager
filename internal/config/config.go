@@ -6,9 +6,11 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	Port      string
-	AWSRegion string
-	RoleName  string
+	Port         string
+	AWSRegion    string
+	RoleName     string
+	AdminUsername string
+	AdminPassword string
 }
 
 // LoadConfig creates and returns application configuration from environment variables
@@ -28,9 +30,21 @@ func LoadConfig() Config {
 		roleName = "IAMManagerCrossAccountRole"
 	}
 
+	adminUsername := os.Getenv("ADMIN_USERNAME")
+	if adminUsername == "" {
+		adminUsername = "admin"
+	}
+
+	adminPassword := os.Getenv("ADMIN_PASSWORD")
+	if adminPassword == "" {
+		adminPassword = "admin" // Default for development only
+	}
+
 	return Config{
-		Port:      port,
-		AWSRegion: region,
-		RoleName:  roleName,
+		Port:         port,
+		AWSRegion:    region,
+		RoleName:     roleName,
+		AdminUsername: adminUsername,
+		AdminPassword: adminPassword,
 	}
 }

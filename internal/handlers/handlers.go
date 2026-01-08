@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/rusik69/aws-iam-manager/internal/config"
 	"github.com/rusik69/aws-iam-manager/internal/middleware"
 	"github.com/rusik69/aws-iam-manager/internal/services"
 
@@ -14,11 +16,13 @@ import (
 
 type Handler struct {
 	awsService services.AWSServiceInterface
+	config     config.Config
 }
 
-func NewHandler(awsService services.AWSServiceInterface) *Handler {
+func NewHandler(awsService services.AWSServiceInterface, cfg config.Config) *Handler {
 	return &Handler{
 		awsService: awsService,
+		config:     cfg,
 	}
 }
 
@@ -79,8 +83,98 @@ func containsAccessDenied(errMsg string) bool {
 		strings.Contains(errMsg, "not authorized")
 }
 
+// LoginRequest represents a login request
+type LoginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+// Login handles user login
+func (h *Handler) Login(c *gin.Context) {
+	var req LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request",
+			"message": "Username and password are required",
+		})
+		return
+	}
+
+	// Validate credentials
+	if req.Username == "" || req.Password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request",
+			"message": "Username and password are required",
+		})
+		return
+	}
+
+	if req.Username != h.config.AdminUsername || req.Password != h.config.AdminPassword {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error":   "Invalid credentials",
+			"message": "Username or password is incorrect",
+		})
+		return
+	}
+
+	// Create session
+	sessionID := middleware.GenerateSessionID()
+	middleware.GetSessionStore().SetSession(sessionID, req.Username)
+
+	// Set cookie - Secure=false for local development (HTTP), set to true in production (HTTPS)
+	// SameSite=Lax allows cookies to be sent with same-site requests
+	c.SetCookie("session_id", sessionID, int(24*time.Hour.Seconds()), "/", "", false, false)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "Login successful",
+		"username":     req.Username,
+		"authenticated": true,
+	})
+}
+
+// Logout handles user logout
+func (h *Handler) Logout(c *gin.Context) {
+	sessionID, err := c.Cookie("session_id")
+	if err == nil && sessionID != "" {
+		middleware.GetSessionStore().DeleteSession(sessionID)
+	}
+
+	// Clear cookie - Secure=false for local development
+	c.SetCookie("session_id", "", -1, "/", "", false, false)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Logout successful",
+	})
+}
+
+// CheckAuth checks if the user is authenticated
+func (h *Handler) CheckAuth(c *gin.Context) {
+	// Check for session cookie directly (this endpoint is public, so no middleware)
+	sessionID, err := c.Cookie("session_id")
+	if err != nil || sessionID == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"authenticated": false,
+		})
+		return
+	}
+
+	// Validate session
+	session, exists := middleware.GetSessionStore().GetSession(sessionID)
+	if !exists {
+		c.JSON(http.StatusOK, gin.H{
+			"authenticated": false,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"authenticated": true,
+		"username":     session.Username,
+	})
+}
+
 func (h *Handler) GetCurrentUser(c *gin.Context) {
-	user, exists := middleware.GetCurrentUser(c)
+	username, exists := middleware.GetCurrentUser(c)
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "User not authenticated",
@@ -89,9 +183,7 @@ func (h *Handler) GetCurrentUser(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"email":         user.Email,
-		"username":      user.PreferredUsername,
-		"groups":        user.Groups,
+		"username":      username,
 		"authenticated": true,
 	})
 }
@@ -176,6 +268,31 @@ func (h *Handler) DeleteUser(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
+}
+
+func (h *Handler) DeleteInactiveUsers(c *gin.Context) {
+	accountID := c.Param("accountId")
+	deletedUsers, failedUsers, err := h.awsService.DeleteInactiveUsers(accountID)
+	if err != nil {
+		fmt.Printf("[ERROR] DeleteInactiveUsers failed for account %s: %v\n", accountID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   err.Error(),
+			"details": fmt.Sprintf("Failed to delete inactive users from account %s. Check AWS credentials and permissions.", accountID),
+		})
+		return
+	}
+
+	response := gin.H{
+		"message":       fmt.Sprintf("Deleted %d inactive user(s) successfully", len(deletedUsers)),
+		"deleted_users": deletedUsers,
+	}
+
+	if len(failedUsers) > 0 {
+		response["failed_users"] = failedUsers
+		response["message"] = fmt.Sprintf("Deleted %d inactive user(s) successfully. Failed to delete %d user(s)", len(deletedUsers), len(failedUsers))
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *Handler) DeleteUserPassword(c *gin.Context) {

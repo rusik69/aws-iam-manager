@@ -8,6 +8,7 @@ import (
 
 	"github.com/rusik69/aws-iam-manager/internal/config"
 	"github.com/rusik69/aws-iam-manager/internal/handlers"
+	"github.com/rusik69/aws-iam-manager/internal/middleware"
 	"github.com/rusik69/aws-iam-manager/internal/services"
 
 	"github.com/gin-contrib/cors"
@@ -25,7 +26,7 @@ type Server struct {
 
 func NewServer(cfg config.Config) *Server {
 	awsService := services.NewAWSService(cfg)
-	handler := handlers.NewHandler(awsService)
+	handler := handlers.NewHandler(awsService, cfg)
 
 	// Initialize Azure handler (optional - will log error if credentials not configured)
 	var azureHandler *handlers.AzureHandler
@@ -87,7 +88,14 @@ func (s *Server) SetupRoutes() *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(customLogger())
-	r.Use(cors.Default())
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization", "accept", "origin", "Cache-Control", "X-Requested-With"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	// Health check endpoints
 	r.GET("/ping", func(c *gin.Context) {
@@ -100,78 +108,89 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 
-	// API routes
+	// Public auth routes (no authentication required)
 	api := r.Group("/api")
 	{
-		// Authentication routes
-		api.GET("/auth/user", s.handler.GetCurrentUser)
+		// Authentication routes (public)
+		api.POST("/auth/login", s.handler.Login)
+		api.POST("/auth/logout", s.handler.Logout)
+		api.GET("/auth/check", s.handler.CheckAuth)
+	}
+
+	// Protected API routes (require authentication)
+	apiProtected := r.Group("/api")
+	apiProtected.Use(middleware.AuthMiddleware())
+	{
+		// Authentication info route
+		apiProtected.GET("/auth/user", s.handler.GetCurrentUser)
 
 		// Account and user management routes
-		api.GET("/accounts", s.handler.ListAccounts)
-		api.GET("/users", s.handler.ListAllUsers) // All users from all accounts in parallel
-		api.GET("/accounts/:accountId/users", s.handler.ListUsers)
-		api.GET("/accounts/:accountId/users/:username", s.handler.GetUser)
-		api.DELETE("/accounts/:accountId/users/:username", s.handler.DeleteUser)
-		api.DELETE("/accounts/:accountId/users/:username/password", s.handler.DeleteUserPassword)
-		api.POST("/accounts/:accountId/users/:username/password/rotate", s.handler.RotateUserPassword)
-		api.POST("/accounts/:accountId/users/:username/keys", s.handler.CreateAccessKey)
-		api.DELETE("/accounts/:accountId/users/:username/keys/:keyId", s.handler.DeleteAccessKey)
-		api.PUT("/accounts/:accountId/users/:username/keys/:keyId/rotate", s.handler.RotateAccessKey)
+		apiProtected.GET("/accounts", s.handler.ListAccounts)
+		apiProtected.GET("/users", s.handler.ListAllUsers) // All users from all accounts in parallel
+		apiProtected.GET("/accounts/:accountId/users", s.handler.ListUsers)
+		apiProtected.GET("/accounts/:accountId/users/:username", s.handler.GetUser)
+		apiProtected.DELETE("/accounts/:accountId/users/:username", s.handler.DeleteUser)
+		apiProtected.DELETE("/accounts/:accountId/users/:username/password", s.handler.DeleteUserPassword)
+		apiProtected.POST("/accounts/:accountId/users/inactive/delete", s.handler.DeleteInactiveUsers)
+		apiProtected.POST("/accounts/:accountId/users/:username/password/rotate", s.handler.RotateUserPassword)
+		apiProtected.POST("/accounts/:accountId/users/:username/keys", s.handler.CreateAccessKey)
+		apiProtected.DELETE("/accounts/:accountId/users/:username/keys/:keyId", s.handler.DeleteAccessKey)
+		apiProtected.PUT("/accounts/:accountId/users/:username/keys/:keyId/rotate", s.handler.RotateAccessKey)
 
 		// IP management routes
-		api.GET("/public-ips", s.handler.ListPublicIPs)
+		apiProtected.GET("/public-ips", s.handler.ListPublicIPs)
 
 		// Security groups routes
-		api.GET("/security-groups", s.handler.ListSecurityGroups)
-		api.GET("/accounts/:accountId/security-groups", s.handler.ListSecurityGroupsByAccount)
-		api.GET("/accounts/:accountId/regions/:region/security-groups/:groupId", s.handler.GetSecurityGroup)
-		api.DELETE("/accounts/:accountId/regions/:region/security-groups/:groupId", s.handler.DeleteSecurityGroup)
+		apiProtected.GET("/security-groups", s.handler.ListSecurityGroups)
+		apiProtected.GET("/accounts/:accountId/security-groups", s.handler.ListSecurityGroupsByAccount)
+		apiProtected.GET("/accounts/:accountId/regions/:region/security-groups/:groupId", s.handler.GetSecurityGroup)
+		apiProtected.DELETE("/accounts/:accountId/regions/:region/security-groups/:groupId", s.handler.DeleteSecurityGroup)
 
 		// Snapshots routes
-		api.GET("/snapshots", s.handler.ListSnapshots)
-		api.GET("/accounts/:accountId/snapshots", s.handler.ListSnapshotsByAccount)
-		api.DELETE("/accounts/:accountId/regions/:region/snapshots/:snapshotId", s.handler.DeleteSnapshot)
+		apiProtected.GET("/snapshots", s.handler.ListSnapshots)
+		apiProtected.GET("/accounts/:accountId/snapshots", s.handler.ListSnapshotsByAccount)
+		apiProtected.DELETE("/accounts/:accountId/regions/:region/snapshots/:snapshotId", s.handler.DeleteSnapshot)
 
 		// EC2 instances routes
-		api.GET("/ec2-instances", s.handler.ListEC2Instances)
-		api.POST("/accounts/:accountId/regions/:region/instances/:instanceId/stop", s.handler.StopEC2Instance)
-		api.POST("/accounts/:accountId/regions/:region/instances/:instanceId/terminate", s.handler.TerminateEC2Instance)
+		apiProtected.GET("/ec2-instances", s.handler.ListEC2Instances)
+		apiProtected.POST("/accounts/:accountId/regions/:region/instances/:instanceId/stop", s.handler.StopEC2Instance)
+		apiProtected.POST("/accounts/:accountId/regions/:region/instances/:instanceId/terminate", s.handler.TerminateEC2Instance)
 
 		// EBS volumes routes
-		api.GET("/ebs-volumes", s.handler.ListEBSVolumes)
-		api.GET("/accounts/:accountId/ebs-volumes", s.handler.ListEBSVolumesByAccount)
-		api.POST("/accounts/:accountId/regions/:region/volumes/:volumeId/detach", s.handler.DetachEBSVolume)
-		api.DELETE("/accounts/:accountId/regions/:region/volumes/:volumeId", s.handler.DeleteEBSVolume)
+		apiProtected.GET("/ebs-volumes", s.handler.ListEBSVolumes)
+		apiProtected.GET("/accounts/:accountId/ebs-volumes", s.handler.ListEBSVolumesByAccount)
+		apiProtected.POST("/accounts/:accountId/regions/:region/volumes/:volumeId/detach", s.handler.DetachEBSVolume)
+		apiProtected.DELETE("/accounts/:accountId/regions/:region/volumes/:volumeId", s.handler.DeleteEBSVolume)
 
 		// S3 buckets routes
-		api.GET("/s3-buckets", s.handler.ListS3Buckets)
-		api.GET("/accounts/:accountId/s3-buckets", s.handler.ListS3BucketsByAccount)
-		api.DELETE("/accounts/:accountId/regions/:region/buckets/:bucketName", s.handler.DeleteS3Bucket)
+		apiProtected.GET("/s3-buckets", s.handler.ListS3Buckets)
+		apiProtected.GET("/accounts/:accountId/s3-buckets", s.handler.ListS3BucketsByAccount)
+		apiProtected.DELETE("/accounts/:accountId/regions/:region/buckets/:bucketName", s.handler.DeleteS3Bucket)
 
 		// IAM roles routes
-		api.GET("/roles", s.handler.ListAllRoles)
-		api.GET("/accounts/:accountId/roles", s.handler.ListRoles)
-		api.GET("/accounts/:accountId/roles/:roleName", s.handler.GetRole)
-		api.DELETE("/accounts/:accountId/roles/:roleName", s.handler.DeleteRole)
+		apiProtected.GET("/roles", s.handler.ListAllRoles)
+		apiProtected.GET("/accounts/:accountId/roles", s.handler.ListRoles)
+		apiProtected.GET("/accounts/:accountId/roles/:roleName", s.handler.GetRole)
+		apiProtected.DELETE("/accounts/:accountId/roles/:roleName", s.handler.DeleteRole)
 
 		// Load balancer routes
-		api.GET("/load-balancers", s.handler.ListAllLoadBalancers)
-		api.GET("/accounts/:accountId/load-balancers", s.handler.ListLoadBalancersByAccount)
-		api.DELETE("/accounts/:accountId/regions/:region/load-balancers", s.handler.DeleteLoadBalancer)
+		apiProtected.GET("/load-balancers", s.handler.ListAllLoadBalancers)
+		apiProtected.GET("/accounts/:accountId/load-balancers", s.handler.ListLoadBalancersByAccount)
+		apiProtected.DELETE("/accounts/:accountId/regions/:region/load-balancers", s.handler.DeleteLoadBalancer)
 
 		// VPC routes
-		api.GET("/vpcs", s.handler.ListVPCs)
-		api.GET("/accounts/:accountId/vpcs", s.handler.ListVPCsByAccount)
-		api.DELETE("/accounts/:accountId/regions/:region/vpcs/:vpcId", s.handler.DeleteVPC)
+		apiProtected.GET("/vpcs", s.handler.ListVPCs)
+		apiProtected.GET("/accounts/:accountId/vpcs", s.handler.ListVPCsByAccount)
+		apiProtected.DELETE("/accounts/:accountId/regions/:region/vpcs/:vpcId", s.handler.DeleteVPC)
 
 		// NAT Gateway routes
-		api.GET("/nat-gateways", s.handler.ListNATGateways)
-		api.GET("/accounts/:accountId/nat-gateways", s.handler.ListNATGatewaysByAccount)
-		api.DELETE("/accounts/:accountId/regions/:region/nat-gateways/:natGatewayId", s.handler.DeleteNATGateway)
+		apiProtected.GET("/nat-gateways", s.handler.ListNATGateways)
+		apiProtected.GET("/accounts/:accountId/nat-gateways", s.handler.ListNATGatewaysByAccount)
+		apiProtected.DELETE("/accounts/:accountId/regions/:region/nat-gateways/:natGatewayId", s.handler.DeleteNATGateway)
 
 		// Azure enterprise applications routes (if Azure is configured)
 		if s.azureHandler != nil {
-			azure := api.Group("/azure")
+			azure := apiProtected.Group("/azure")
 			{
 				azure.GET("/enterprise-applications", s.azureHandler.ListEnterpriseApplications)
 				azure.GET("/enterprise-applications/:appId", s.azureHandler.GetEnterpriseApplication)
@@ -185,21 +204,21 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		}
 
 		// Cache management routes
-		api.POST("/cache/clear", s.handler.ClearCache)
-		api.POST("/cache/accounts/:accountId/invalidate", s.handler.InvalidateAccountCache)
-		api.POST("/cache/accounts/:accountId/users/:username/invalidate", s.handler.InvalidateUserCache)
-		api.POST("/cache/public-ips/invalidate", s.handler.InvalidatePublicIPsCache)
-		api.POST("/cache/security-groups/invalidate", s.handler.InvalidateSecurityGroupsCache)
-		api.POST("/cache/accounts/:accountId/security-groups/invalidate", s.handler.InvalidateAccountSecurityGroupsCache)
-		api.POST("/cache/ec2-instances/invalidate", s.handler.InvalidateEC2InstancesCache)
-		api.POST("/cache/ebs-volumes/invalidate", s.handler.InvalidateEBSVolumesCache)
-		api.POST("/cache/s3-buckets/invalidate", s.handler.InvalidateS3BucketsCache)
-		api.POST("/cache/roles/invalidate", s.handler.InvalidateRolesCache)
-		api.POST("/cache/accounts/:accountId/roles/invalidate", s.handler.InvalidateAccountRolesCache)
-		api.POST("/cache/load-balancers/invalidate", s.handler.InvalidateAllLoadBalancersCache)
-		api.POST("/cache/accounts/:accountId/load-balancers/invalidate", s.handler.InvalidateLoadBalancersCache)
-		api.POST("/cache/vpcs/invalidate", s.handler.InvalidateVPCsCache)
-		api.POST("/cache/nat-gateways/invalidate", s.handler.InvalidateNATGatewaysCache)
+		apiProtected.POST("/cache/clear", s.handler.ClearCache)
+		apiProtected.POST("/cache/accounts/:accountId/invalidate", s.handler.InvalidateAccountCache)
+		apiProtected.POST("/cache/accounts/:accountId/users/:username/invalidate", s.handler.InvalidateUserCache)
+		apiProtected.POST("/cache/public-ips/invalidate", s.handler.InvalidatePublicIPsCache)
+		apiProtected.POST("/cache/security-groups/invalidate", s.handler.InvalidateSecurityGroupsCache)
+		apiProtected.POST("/cache/accounts/:accountId/security-groups/invalidate", s.handler.InvalidateAccountSecurityGroupsCache)
+		apiProtected.POST("/cache/ec2-instances/invalidate", s.handler.InvalidateEC2InstancesCache)
+		apiProtected.POST("/cache/ebs-volumes/invalidate", s.handler.InvalidateEBSVolumesCache)
+		apiProtected.POST("/cache/s3-buckets/invalidate", s.handler.InvalidateS3BucketsCache)
+		apiProtected.POST("/cache/roles/invalidate", s.handler.InvalidateRolesCache)
+		apiProtected.POST("/cache/accounts/:accountId/roles/invalidate", s.handler.InvalidateAccountRolesCache)
+		apiProtected.POST("/cache/load-balancers/invalidate", s.handler.InvalidateAllLoadBalancersCache)
+		apiProtected.POST("/cache/accounts/:accountId/load-balancers/invalidate", s.handler.InvalidateLoadBalancersCache)
+		apiProtected.POST("/cache/vpcs/invalidate", s.handler.InvalidateVPCsCache)
+		apiProtected.POST("/cache/nat-gateways/invalidate", s.handler.InvalidateNATGatewaysCache)
 	}
 
 	// Serve frontend

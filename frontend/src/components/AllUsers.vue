@@ -90,6 +90,31 @@
           >
             With Passwords ({{ usersWithPasswords }})
           </button>
+          <button 
+            @click="userFilter = 'inactive'" 
+            :class="['filter-btn', { active: userFilter === 'inactive' }]"
+          >
+            Inactive (6+ months) ({{ inactiveUsersCount }})
+          </button>
+        </div>
+        <div class="account-actions">
+          <select v-model="selectedAccount" class="account-select">
+            <option value="">All Accounts</option>
+            <option v-for="account in accounts" :key="account.id" :value="account.id">
+              {{ account.name }} ({{ account.id }})
+            </option>
+          </select>
+          <button 
+            @click="deleteInactiveUsers" 
+            class="btn btn-danger" 
+            :disabled="!selectedAccount || deletingInactive"
+            :title="selectedAccount ? `Delete inactive users from ${getAccountName(selectedAccount)}` : 'Select an account first'"
+          >
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+            {{ deletingInactive ? 'Deleting...' : 'Delete Inactive Users' }}
+          </button>
         </div>
       </div>
 
@@ -250,7 +275,9 @@ export default {
       userFilter: 'all',
       actionLoading: {},
       sortField: 'username',
-      sortDirection: 'asc'
+      sortDirection: 'asc',
+      selectedAccount: '',
+      deletingInactive: false
     }
   },
   computed: {
@@ -271,6 +298,64 @@ export default {
     usersWithPasswords() {
       return this.allUsers?.filter(user => user.password_set)?.length || 0
     },
+    inactiveUsersCount() {
+      const sixMonthsAgo = new Date()
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+      
+      return this.allUsers?.filter(user => {
+        // Check password last used
+        if (user.password_set && user.password_last_used) {
+          const passwordLastUsed = new Date(user.password_last_used)
+          if (passwordLastUsed > sixMonthsAgo) {
+            return false
+          }
+        }
+        
+        // Check access keys last used
+        if (user.access_keys && user.access_keys.length > 0) {
+          for (const key of user.access_keys) {
+            if (key.status === 'Active' && key.last_used_date) {
+              const lastUsed = new Date(key.last_used_date)
+              if (lastUsed > sixMonthsAgo) {
+                return false
+              }
+            }
+          }
+        }
+        
+        // User is inactive if no password or password not used in 6 months,
+        // and no active keys or all keys unused for 6+ months
+        return true
+      })?.length || 0
+    },
+    inactiveUsers() {
+      const sixMonthsAgo = new Date()
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+      
+      return this.allUsers?.filter(user => {
+        // Check password last used
+        if (user.password_set && user.password_last_used) {
+          const passwordLastUsed = new Date(user.password_last_used)
+          if (passwordLastUsed > sixMonthsAgo) {
+            return false
+          }
+        }
+        
+        // Check access keys last used
+        if (user.access_keys && user.access_keys.length > 0) {
+          for (const key of user.access_keys) {
+            if (key.status === 'Active' && key.last_used_date) {
+              const lastUsed = new Date(key.last_used_date)
+              if (lastUsed > sixMonthsAgo) {
+                return false
+              }
+            }
+          }
+        }
+        
+        return true
+      }) || []
+    },
     enrichedUsers() {
       return this.allUsers?.map(user => {
         const account = this.accounts?.find(acc => acc.id === user.accountId)
@@ -282,6 +367,11 @@ export default {
     },
     filteredUsers() {
       let users = this.enrichedUsers
+
+      // Apply account filter first
+      if (this.selectedAccount) {
+        users = users.filter(user => user.accountId === this.selectedAccount)
+      }
 
       // Apply search filter
       if (this.userSearchQuery) {
@@ -315,6 +405,35 @@ export default {
           break
         case 'withPasswords':
           users = users.filter(user => user.password_set)
+          break
+        case 'inactive':
+          users = users.filter(user => {
+            // Apply inactive filter only to current filtered users
+            const sixMonthsAgo = new Date()
+            sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+            
+            // Check password last used
+            if (user.password_set && user.password_last_used) {
+              const passwordLastUsed = new Date(user.password_last_used)
+              if (passwordLastUsed > sixMonthsAgo) {
+                return false
+              }
+            }
+            
+            // Check access keys last used
+            if (user.access_keys && user.access_keys.length > 0) {
+              for (const key of user.access_keys) {
+                if (key.status === 'Active' && key.last_used_date) {
+                  const lastUsed = new Date(key.last_used_date)
+                  if (lastUsed > sixMonthsAgo) {
+                    return false
+                  }
+                }
+              }
+            }
+            
+            return true
+          })
           break
         default:
           // users remains as enrichedUsers
@@ -519,14 +638,68 @@ export default {
       this.$router.push(`/accounts/${accountId}/users/${username}`)
     },
     
+    getAccountName(accountId) {
+      const account = this.accounts?.find(acc => acc.id === accountId)
+      return account?.name || accountId
+    },
+    
+    async deleteInactiveUsers() {
+      if (!this.selectedAccount) {
+        alert('Please select an account first')
+        return
+      }
+      
+      const accountName = this.getAccountName(this.selectedAccount)
+      const inactiveCount = this.inactiveUsers.filter(u => u.accountId === this.selectedAccount).length
+      
+      if (inactiveCount === 0) {
+        alert(`No inactive users found in account ${accountName}`)
+        return
+      }
+      
+      const confirmMessage = `Are you sure you want to DELETE ${inactiveCount} inactive user(s) from account "${accountName}"?\n\nThis will permanently delete users that have been inactive for 6+ months.\n\nThis action cannot be undone!`
+      
+      if (!confirm(confirmMessage)) return
+      
+      this.deletingInactive = true
+      
+      try {
+        const response = await axios.post(`/api/accounts/${this.selectedAccount}/users/inactive/delete`)
+        const deletedUsers = response.data.deleted_users || []
+        const failedCount = response.data.failed_users?.length || 0
+        
+        // Remove deleted users from local state without full refresh
+        if (deletedUsers.length > 0) {
+          const deletedSet = new Set(deletedUsers)
+          this.allUsers = this.allUsers.filter(
+            user => !(user.accountId === this.selectedAccount && deletedSet.has(user.username))
+          )
+        }
+        
+        let message = `Successfully deleted ${deletedUsers.length} inactive user(s) from ${accountName}`
+        if (failedCount > 0) {
+          message += `\n\nFailed to delete ${failedCount} user(s):\n${response.data.failed_users.join('\n')}`
+        }
+        alert(message)
+        
+        // Invalidate cache for the account to ensure fresh data on next load
+        try {
+          await axios.post(`/api/cache/accounts/${this.selectedAccount}/invalidate`)
+        } catch (cacheErr) {
+          console.warn('Failed to invalidate account cache:', cacheErr)
+        }
+      } catch (error) {
+        console.error('Failed to delete inactive users:', error)
+        alert(error.response?.data?.error || error.response?.data?.details || 'Failed to delete inactive users. Please try again.')
+      } finally {
+        this.deletingInactive = false
+      }
+    },
+
     async deleteUser(accountId, username) {
       const confirmMessage = `Are you sure you want to DELETE the user "${username}"?\n\nThis will:\n1. Delete all access keys for this user\n2. Delete the user's login profile (if exists)\n3. Permanently delete the user\n\nThis action cannot be undone!`
       
       if (!confirm(confirmMessage)) return
-      
-      // Second confirmation for safety
-      const finalConfirmation = confirm(`FINAL CONFIRMATION:\nType "DELETE" to confirm deletion of user "${username}"`)
-      if (!finalConfirmation) return
       
       const loadingKey = `${accountId}-${username}`
       this.actionLoading[loadingKey] = true
@@ -837,6 +1010,31 @@ export default {
   background: var(--color-btn-primary);
   color: white;
   border-color: transparent;
+}
+
+.account-actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.account-select {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 0.95rem;
+  min-width: 250px;
+  cursor: pointer;
+}
+
+.account-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
 }
 
 /* Users Table */

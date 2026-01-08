@@ -35,9 +35,9 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: oauth2-proxy
+            name: aws-iam-manager
             port:
-              number: 80
+              number: 8080
   # For external access via IP or custom domain (configurable)
   - host: "*.amazonaws.com"
     http:
@@ -46,9 +46,9 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: oauth2-proxy
+            name: aws-iam-manager
             port:
-              number: 80
+              number: 8080
   # For local testing and direct IP access
   - http:
       paths:
@@ -56,6 +56,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: oauth2-proxy
+            name: aws-iam-manager
             port:
-              number: 80
+              number: 8080

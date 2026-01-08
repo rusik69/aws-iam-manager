@@ -20,6 +20,10 @@
           <router-link to="/vpcs" class="nav-link">VPCs</router-link>
           <router-link to="/nat-gateways" class="nav-link">NAT Gateways</router-link>
           <router-link to="/azure/enterprise-apps" class="nav-link">Azure Apps</router-link>
+          <div v-if="isAuthenticated" class="user-info">
+            <span class="username">{{ username }}</span>
+            <button @click="handleLogout" class="logout-btn">Logout</button>
+          </div>
           <button @click="toggleTheme" class="theme-btn">
             {{ isDarkTheme ? '☀️' : '🌙' }}
           </button>
@@ -41,7 +45,9 @@ export default {
   name: 'App',
   data() {
     return {
-      isDarkTheme: false
+      isDarkTheme: false,
+      isAuthenticated: false,
+      username: ''
     }
   },
   methods: {
@@ -63,10 +69,50 @@ export default {
       
       this.isDarkTheme = savedTheme === 'dark' || (!savedTheme && prefersDark)
       this.updateTheme()
+    },
+    async checkAuth() {
+      try {
+        const response = await fetch('/api/auth/check', {
+          credentials: 'include'
+        })
+        const data = await response.json()
+        this.isAuthenticated = data.authenticated || false
+        this.username = data.username || ''
+      } catch (err) {
+        this.isAuthenticated = false
+        this.username = ''
+      }
+    },
+    async handleLogout() {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'include'
+        })
+        this.isAuthenticated = false
+        this.username = ''
+        this.$router.push('/login')
+      } catch (err) {
+        // Even if logout fails, redirect to login
+        this.isAuthenticated = false
+        this.username = ''
+        this.$router.push('/login')
+      }
     }
   },
   mounted() {
     this.initTheme()
+    this.checkAuth()
+    // Check auth status periodically
+    setInterval(() => {
+      this.checkAuth()
+    }, 60000) // Check every minute
+  },
+  watch: {
+    $route() {
+      // Check auth when route changes
+      this.checkAuth()
+    }
   }
 }
 </script>
@@ -237,6 +283,35 @@ nav {
 
 .theme-btn:hover {
   background: var(--color-bg-tertiary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.username {
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}
+
+.logout-btn {
+  background: var(--color-btn-danger);
+  color: white;
+  border: none;
+  padding: var(--spacing-sm) var(--spacing);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+}
+
+.logout-btn:hover {
+  background: var(--color-btn-danger-hover);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
 }
