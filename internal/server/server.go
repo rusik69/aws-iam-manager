@@ -19,9 +19,10 @@ import (
 // TODO: Add embed support for production builds
 
 type Server struct {
-	config       config.Config
-	handler      *handlers.Handler
-	azureHandler *handlers.AzureHandler
+	config          config.Config
+	handler         *handlers.Handler
+	azureHandler    *handlers.AzureHandler
+	azureRMHandler  *handlers.AzureRMHandler
 }
 
 func NewServer(cfg config.Config) *Server {
@@ -39,10 +40,22 @@ func NewServer(cfg config.Config) *Server {
 		log.Printf("[INFO] Azure service initialized successfully")
 	}
 
+	// Initialize Azure Resource Manager handler (optional)
+	var azureRMHandler *handlers.AzureRMHandler
+	azureRMService, err := services.NewAzureRMService()
+	if err != nil {
+		log.Printf("[WARNING] Azure Resource Manager service not initialized: %v", err)
+		log.Printf("[INFO] Azure Resource Manager endpoints will not be available. Set AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET to enable Azure RM features.")
+	} else {
+		azureRMHandler = handlers.NewAzureRMHandler(azureRMService)
+		log.Printf("[INFO] Azure Resource Manager service initialized successfully (works across all subscriptions)")
+	}
+
 	return &Server{
-		config:       cfg,
-		handler:      handler,
-		azureHandler: azureHandler,
+		config:         cfg,
+		handler:        handler,
+		azureHandler:   azureHandler,
+		azureRMHandler: azureRMHandler,
 	}
 }
 
@@ -188,10 +201,12 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		apiProtected.GET("/accounts/:accountId/nat-gateways", s.handler.ListNATGatewaysByAccount)
 		apiProtected.DELETE("/accounts/:accountId/regions/:region/nat-gateways/:natGatewayId", s.handler.DeleteNATGateway)
 
-		// Azure enterprise applications routes (if Azure is configured)
-		if s.azureHandler != nil {
+		// Azure routes (combine Azure AD and Azure RM routes in a single /azure group)
+		if s.azureHandler != nil || s.azureRMHandler != nil {
 			azure := apiProtected.Group("/azure")
-			{
+			
+			// Azure AD routes (if Azure AD handler is configured)
+			if s.azureHandler != nil {
 				azure.GET("/enterprise-applications", s.azureHandler.ListEnterpriseApplications)
 				azure.GET("/enterprise-applications/:appId", s.azureHandler.GetEnterpriseApplication)
 				azure.DELETE("/enterprise-applications/:appId", s.azureHandler.DeleteEnterpriseApplication)
@@ -200,6 +215,29 @@ func (s *Server) SetupRoutes() *gin.Engine {
 				azure.POST("/cache/clear", s.azureHandler.ClearAzureCache)
 				azure.POST("/cache/enterprise-applications/invalidate", s.azureHandler.InvalidateEnterpriseApplicationsCache)
 				azure.POST("/cache/enterprise-applications/:appId/invalidate", s.azureHandler.InvalidateEnterpriseApplicationCache)
+			}
+
+			// Azure Resource Manager routes (if Azure RM handler is configured)
+			if s.azureRMHandler != nil {
+				// Subscription routes
+				azure.GET("/subscriptions", s.azureRMHandler.ListSubscriptions)
+
+				// VM routes
+				azure.GET("/vms", s.azureRMHandler.ListVMs)
+				azure.GET("/subscriptions/:subscriptionId/vms/:resourceGroup/:vmName", s.azureRMHandler.GetVM)
+				azure.POST("/subscriptions/:subscriptionId/vms/:resourceGroup/:vmName/start", s.azureRMHandler.StartVM)
+				azure.POST("/subscriptions/:subscriptionId/vms/:resourceGroup/:vmName/stop", s.azureRMHandler.StopVM)
+				azure.DELETE("/subscriptions/:subscriptionId/vms/:resourceGroup/:vmName", s.azureRMHandler.DeleteVM)
+
+				// Storage account routes
+				azure.GET("/storage-accounts", s.azureRMHandler.ListStorageAccounts)
+				azure.GET("/subscriptions/:subscriptionId/storage-accounts/:resourceGroup/:name", s.azureRMHandler.GetStorageAccount)
+				azure.DELETE("/subscriptions/:subscriptionId/storage-accounts/:resourceGroup/:name", s.azureRMHandler.DeleteStorageAccount)
+
+				// Azure RM cache management routes
+				azure.POST("/rm/cache/clear", s.azureRMHandler.ClearAzureRMCache)
+				azure.POST("/rm/cache/vms/invalidate", s.azureRMHandler.InvalidateVMsCache)
+				azure.POST("/rm/cache/storage/invalidate", s.azureRMHandler.InvalidateStorageCache)
 			}
 		}
 

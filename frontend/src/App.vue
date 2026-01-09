@@ -20,6 +20,8 @@
           <router-link to="/vpcs" class="nav-link">VPCs</router-link>
           <router-link to="/nat-gateways" class="nav-link">NAT Gateways</router-link>
           <router-link to="/azure/enterprise-apps" class="nav-link">Azure Apps</router-link>
+          <router-link to="/azure/vms" class="nav-link">Azure VMs</router-link>
+          <router-link to="/azure/storage" class="nav-link">Azure Storage</router-link>
           <div v-if="isAuthenticated" class="user-info">
             <span class="username">{{ username }}</span>
             <button @click="handleLogout" class="logout-btn">Logout</button>

@@ -16,6 +16,8 @@ import LoadBalancers from './components/LoadBalancers.vue'
 import VPCs from './components/VPCs.vue'
 import NATGateways from './components/NATGateways.vue'
 import AzureEnterpriseApps from './components/AzureEnterpriseApps.vue'
+import AzureVMs from './components/AzureVMs.vue'
+import AzureStorage from './components/AzureStorage.vue'
 
 const routes = [
   { path: '/login', name: 'Login', component: Login },
@@ -32,7 +34,9 @@ const routes = [
   { path: '/vpcs', name: 'VPCs', component: VPCs, meta: { requiresAuth: true } },
   { path: '/nat-gateways', name: 'NATGateways', component: NATGateways, meta: { requiresAuth: true } },
   { path: '/accounts/:accountId/users/:username', name: 'UserDetail', component: UserDetail, props: true, meta: { requiresAuth: true } },
-  { path: '/azure/enterprise-apps', name: 'AzureEnterpriseApps', component: AzureEnterpriseApps, meta: { requiresAuth: true } }
+  { path: '/azure/enterprise-apps', name: 'AzureEnterpriseApps', component: AzureEnterpriseApps, meta: { requiresAuth: true } },
+  { path: '/azure/vms', name: 'AzureVMs', component: AzureVMs, meta: { requiresAuth: true } },
+  { path: '/azure/storage', name: 'AzureStorage', component: AzureStorage, meta: { requiresAuth: true } }
 ]
 
 const router = createRouter({

@@ -84,3 +84,19 @@ type AzureServiceInterface interface {
 	InvalidateEnterpriseApplicationsCache()
 	InvalidateEnterpriseApplicationCache(appID string)
 }
+
+type AzureRMServiceInterface interface {
+	ListSubscriptions(ctx context.Context) ([]models.AzureSubscription, error)
+	ListVMs(ctx context.Context, subscriptionID string) ([]models.AzureVM, error)
+	GetVM(ctx context.Context, subscriptionID, resourceGroup, vmName string) (*models.AzureVM, error)
+	StartVM(ctx context.Context, subscriptionID, resourceGroup, vmName string) error
+	StopVM(ctx context.Context, subscriptionID, resourceGroup, vmName string) error
+	DeleteVM(ctx context.Context, subscriptionID, resourceGroup, vmName string) error
+	ListStorageAccounts(ctx context.Context, subscriptionID string) ([]models.AzureStorageAccount, error)
+	GetStorageAccount(ctx context.Context, subscriptionID, resourceGroup, name string) (*models.AzureStorageAccount, error)
+	DeleteStorageAccount(ctx context.Context, subscriptionID, resourceGroup, name string) error
+	// Cache methods
+	ClearCache()
+	InvalidateVMsCache()
+	InvalidateStorageCache()
+}
