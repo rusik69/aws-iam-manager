@@ -3,7 +3,7 @@
 
 # Default target
 help:
-	@echo "AWS IAM Manager - Unified Build System"
+	@echo "Cloud Manager - Unified Build System"
 	@echo ""
 	@echo "🏗️  Build Targets:"
 	@echo "  build-frontend   - Build Vue.js frontend"
@@ -91,7 +91,7 @@ build-frontend:
 build-backend:
 	@echo "🔧 Building backend server..."
 	mkdir -p bin
-	go build -o bin/aws-iam-manager ./cmd/server
+	go build -o bin/cloud-manager ./cmd/server
 
 # CLI build
 build-cli:
@@ -117,7 +117,7 @@ build-prod:
 	@echo "🚀 Building for production..."
 	$(MAKE) build-frontend
 	mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags '-w -s' -o bin/aws-iam-manager-prod ./cmd/server
+	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags '-w -s' -o bin/cloud-manager-prod ./cmd/server
 	$(MAKE) build-cli
 
 # Multi-platform release binaries
@@ -126,11 +126,11 @@ build-release:
 	@mkdir -p bin/release
 	$(MAKE) build-frontend
 	# Backend server
-	GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o bin/release/aws-iam-manager-server-linux-amd64 ./cmd/server
-	GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o bin/release/aws-iam-manager-server-linux-arm64 ./cmd/server
-	GOOS=darwin GOARCH=amd64 go build -ldflags="-w -s" -o bin/release/aws-iam-manager-server-darwin-amd64 ./cmd/server
-	GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o bin/release/aws-iam-manager-server-darwin-arm64 ./cmd/server
-	GOOS=windows GOARCH=amd64 go build -ldflags="-w -s" -o bin/release/aws-iam-manager-server-windows-amd64.exe ./cmd/server
+	GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o bin/release/cloud-manager-server-linux-amd64 ./cmd/server
+	GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o bin/release/cloud-manager-server-linux-arm64 ./cmd/server
+	GOOS=darwin GOARCH=amd64 go build -ldflags="-w -s" -o bin/release/cloud-manager-server-darwin-amd64 ./cmd/server
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o bin/release/cloud-manager-server-darwin-arm64 ./cmd/server
+	GOOS=windows GOARCH=amd64 go build -ldflags="-w -s" -o bin/release/cloud-manager-server-windows-amd64.exe ./cmd/server
 	# CLI binary
 	GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o bin/release/iam-manager-linux-amd64 ./cmd/iam-manager
 	GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o bin/release/iam-manager-linux-arm64 ./cmd/iam-manager
@@ -158,9 +158,9 @@ dev:
 		--no-cache \
 		--build-arg BUILDKIT_INLINE_CACHE=1 \
 		--network=host \
-		-t aws-iam-manager:dev . || \
+		-t cloud-manager:dev . || \
 		(echo "❌ Docker build failed. Trying without network isolation..." && \
-		 docker build --no-cache --network=host -t aws-iam-manager:dev .)
+		 docker build --no-cache --network=host -t cloud-manager:dev .)
 	@echo "☸️  Deploying to Kubernetes cluster..."
 	@kubectl apply -f k8s/namespace.yaml
 	@echo "🔐 Generating admin password..."
@@ -179,17 +179,17 @@ dev:
 		echo "✅ Using existing admin password from .env.prod"; \
 	fi; \
 	ADMIN_USERNAME=$$(grep '^ADMIN_USERNAME=' .env.prod 2>/dev/null | cut -d'=' -f2 || echo "admin"); \
-	kubectl create secret generic app-secrets --namespace=aws-iam-manager \
+	kubectl create secret generic app-secrets --namespace=cloud-manager \
 		--from-env-file=.env.prod \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@kubectl apply -f k8s/configmap.yaml
-	@sed 's|image: ghcr.io/rusik69/aws-iam-manager:latest|image: aws-iam-manager:dev\n        imagePullPolicy: Never|' \
+	@sed 's|image: ghcr.io/rusik69/cloud-manager:latest|image: cloud-manager:dev\n        imagePullPolicy: Never|' \
 		k8s/app-deployment.yaml | kubectl apply -f -
 	@kubectl apply -f k8s/service.yaml
 	@echo "🔄 Forcing pod restart to pick up new image..."
-	@kubectl rollout restart deployment/aws-iam-manager -n aws-iam-manager
+	@kubectl rollout restart deployment/cloud-manager -n cloud-manager
 	@echo "⏳ Waiting for deployment to be ready..."
-	@kubectl rollout status deployment/aws-iam-manager -n aws-iam-manager --timeout=120s
+	@kubectl rollout status deployment/cloud-manager -n cloud-manager --timeout=120s
 	@echo "✅ Deployment ready!"
 	@echo ""
 	@ADMIN_USERNAME=$$(grep '^ADMIN_USERNAME=' .env.prod 2>/dev/null | cut -d'=' -f2 || echo "admin"); \
@@ -199,20 +199,20 @@ dev:
 	@echo "💡 Access the app at http://localhost:8080"
 	@echo "🔌 Starting port-forward and showing logs (Ctrl+C to stop)..."
 	@trap 'kill 0' INT TERM; \
-	kubectl port-forward -n aws-iam-manager svc/aws-iam-manager 8080:8080 & \
-	sleep 2 && kubectl logs -f -n aws-iam-manager -l app.kubernetes.io/name=aws-iam-manager & \
+	kubectl port-forward -n cloud-manager svc/cloud-manager 8080:8080 & \
+	sleep 2 && kubectl logs -f -n cloud-manager -l app.kubernetes.io/name=cloud-manager & \
 	wait
 
 # Stop local k8s development deployment
 dev-stop:
 	@echo "🛑 Stopping local Kubernetes deployment..."
-	@kubectl delete deployment aws-iam-manager -n aws-iam-manager --ignore-not-found
-	@kubectl delete secret app-secrets -n aws-iam-manager --ignore-not-found
+	@kubectl delete deployment cloud-manager -n cloud-manager --ignore-not-found
+	@kubectl delete secret app-secrets -n cloud-manager --ignore-not-found
 	@echo "✅ Local deployment stopped"
 
 # Show logs from local k8s deployment
 dev-logs:
-	@kubectl logs -f -n aws-iam-manager -l app.kubernetes.io/name=aws-iam-manager
+	@kubectl logs -f -n cloud-manager -l app.kubernetes.io/name=cloud-manager
 
 # Frontend development server (standalone)
 dev-frontend:
@@ -586,16 +586,16 @@ deploy:
 	$(eval TARGET_HOST := $(if $(USER),$(USER)@$(HOST),$(HOST)))
 	@echo "☸️  Deploying application to $(TARGET_HOST) using Kubernetes..."
 	@echo "📤 Copying Kubernetes manifests to $(TARGET_HOST)..."
-	@scp -r k8s/ $(TARGET_HOST):~/aws-iam-manager/
+	@scp -r k8s/ $(TARGET_HOST):~/cloud-manager/
 	@if [ -f .env.prod ]; then \
 		echo "📤 Copying production environment file (.env.prod)..."; \
-		scp .env.prod $(TARGET_HOST):~/aws-iam-manager/k8s/.env; \
+		scp .env.prod $(TARGET_HOST):~/cloud-manager/k8s/.env; \
 	else \
 		echo "⚠️  No .env.prod found, creating from .env.example"; \
-		scp .env.example $(TARGET_HOST):~/aws-iam-manager/k8s/.env; \
+		scp .env.example $(TARGET_HOST):~/cloud-manager/k8s/.env; \
 	fi
 	@echo "☸️  Configuring secrets and deploying to Kubernetes..."
-	@ssh $(TARGET_HOST) 'cd ~/aws-iam-manager && \
+	@ssh $(TARGET_HOST) 'cd ~/cloud-manager && \
 		echo "🔐 Generating admin password..." && \
 		if ! grep -q "^ADMIN_PASSWORD=" k8s/.env 2>/dev/null || [ -z "$$(grep '\''^ADMIN_PASSWORD='\'' k8s/.env | cut -d'\''='\'' -f2)" ]; then \
 			ADMIN_PASSWORD=$$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); \
@@ -615,7 +615,7 @@ deploy:
 		echo "☸️  Creating namespace first..." && \
 		kubectl apply -f k8s/namespace.yaml && \
 		echo "🔐 Creating Kubernetes secrets from environment file..." && \
-		kubectl create secret generic app-secrets --namespace=aws-iam-manager \
+		kubectl create secret generic app-secrets --namespace=cloud-manager \
 			--from-env-file=k8s/.env \
 			--dry-run=client -o yaml | kubectl apply -f - && \
 		echo "☸️  Applying cert-manager configuration..." && \
@@ -631,7 +631,7 @@ deploy:
 	@echo "✅ Application deployed successfully to Kubernetes cluster on $(TARGET_HOST)"
 	@echo ""
 	@echo "🔐 Admin credentials configured"
-	@ssh $(TARGET_HOST) 'cd ~/aws-iam-manager && \
+	@ssh $(TARGET_HOST) 'cd ~/cloud-manager && \
 		ADMIN_USERNAME=$$(grep '\''^ADMIN_USERNAME='\'' k8s/.env 2>/dev/null | cut -d'\''='\'' -f2 || echo "admin"); \
 		echo "  Username: $$ADMIN_USERNAME"; \
 		echo "  Password stored in k8s/.env file (not displayed for security)"'
@@ -640,14 +640,14 @@ deploy:
 	@echo "  📍 HTTPS Access (Port 443): https://$(HOST)"
 	@echo "  📍 HTTP Access (Port 80): http://$(HOST) (redirects to HTTPS)"
 	@echo "  📍 Via Nginx Ingress Controller with Let's Encrypt SSL"
-	@echo "  📍 Traffic flows: Internet → Ingress (SSL termination) → aws-iam-manager service → backend"
+	@echo "  📍 Traffic flows: Internet → Ingress (SSL termination) → cloud-manager service → backend"
 	@echo ""
 	@echo "🔍 Checking deployment status..."
-	@ssh $(TARGET_HOST) 'kubectl get pods -n aws-iam-manager && kubectl get services -n aws-iam-manager && kubectl get ingress -n aws-iam-manager && kubectl get certificates -n aws-iam-manager'
+	@ssh $(TARGET_HOST) 'kubectl get pods -n cloud-manager && kubectl get services -n cloud-manager && kubectl get ingress -n cloud-manager && kubectl get certificates -n cloud-manager'
 	@echo ""
 	@echo "🔒 SSL Certificate Information:"
 	@echo "   • Let's Encrypt certificate will be automatically provisioned"
-	@echo "   • Certificate status: kubectl get certificates -n aws-iam-manager"
+	@echo "   • Certificate status: kubectl get certificates -n cloud-manager"
 	@echo "   • Certificate issuer: letsencrypt-prod"
 	@echo ""
 	@echo "💡 External Access:"
@@ -743,18 +743,18 @@ lint-docker:
 # Build Docker image
 docker-build: build-frontend
 	@echo "🐳 Building Docker image..."
-	docker build -t aws-iam-manager:latest .
+	docker build -t cloud-manager:latest .
 
 # Build and tag Docker image for GitHub Container Registry
 docker-build-ghcr: build-frontend
 	@echo "🐳 Building Docker image for GHCR..."
-	docker build -t ghcr.io/rusik69/aws-iam-manager:latest .
+	docker build -t ghcr.io/rusik69/cloud-manager:latest .
 
 # Build multi-architecture Docker image
 docker-build-multiarch: build-frontend
 	@echo "🐳 Building multi-architecture Docker image..."
 	docker buildx create --use --name multiarch-builder || true
-	docker buildx build --platform linux/amd64,linux/arm64 -t aws-iam-manager:latest .
+	docker buildx build --platform linux/amd64,linux/arm64 -t cloud-manager:latest .
 	docker buildx rm multiarch-builder
 
 # Build multi-architecture Docker image and push to registry
@@ -767,18 +767,18 @@ docker-build-multiarch-push: build-frontend
 # Push Docker image to GitHub Container Registry
 docker-push-ghcr: docker-build-ghcr
 	@echo "📤 Pushing Docker image to GHCR..."
-	docker push ghcr.io/rusik69/aws-iam-manager:latest
+	docker push ghcr.io/rusik69/cloud-manager:latest
 
 # Run Docker container locally
 docker-run:
 	@echo "🐳 Running Docker container locally..."
-	docker run -d -p 8080:8080 --name aws-iam-manager \
+	docker run -d -p 8080:8080 --name cloud-manager \
 		--env-file .env.prod \
-		aws-iam-manager:latest
+		cloud-manager:latest
 	@echo "✅ Container started successfully"
 	@echo "📍 Application available at: http://localhost:8080"
-	@echo "💡 To stop: docker stop aws-iam-manager"
-	@echo "💡 To remove: docker rm aws-iam-manager"
+	@echo "💡 To stop: docker stop cloud-manager"
+	@echo "💡 To remove: docker rm cloud-manager"
 
 # Validate GitHub Actions workflows
 validate-workflows:
@@ -799,7 +799,7 @@ pre-commit: fmt lint test security-scan lint-docker validate-workflows
 release-build: clean build-prod
 	@echo "📦 Creating release artifacts..."
 	@mkdir -p dist
-	@cp aws-iam-manager dist/
+	@cp cloud-manager dist/
 	@cp -r frontend/dist dist/frontend
-	@tar -czf dist/aws-iam-manager-release.tar.gz -C dist aws-iam-manager frontend
-	@echo "✅ Release build created: dist/aws-iam-manager-release.tar.gz"
+	@tar -czf dist/cloud-manager-release.tar.gz -C dist cloud-manager frontend
+	@echo "✅ Release build created: dist/cloud-manager-release.tar.gz"

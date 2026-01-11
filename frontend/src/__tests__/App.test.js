@@ -36,7 +36,7 @@ describe('App.vue', () => {
         }
       }
     })
-    expect(wrapper.find('h1').text()).toBe('AWS IAM Manager')
+    expect(wrapper.find('h1').text()).toBe('Cloud Manager')
   })
 
   it('renders header with navigation', () => {

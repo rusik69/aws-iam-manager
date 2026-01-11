@@ -54,7 +54,7 @@ make deploy HOST=aws-manager.mydomain.org
 1. **Certificate Request**: The Certificate resource requests a certificate from Let's Encrypt
 2. **HTTP-01 Challenge**: cert-manager performs domain validation via HTTP-01 challenge
 3. **Certificate Issuance**: Let's Encrypt issues the certificate
-4. **Secret Creation**: Certificate is stored in `aws-iam-manager-tls` secret
+4. **Secret Creation**: Certificate is stored in `cloud-manager-tls` secret
 5. **Ingress Configuration**: Nginx ingress uses the certificate for SSL termination
 
 ## Verification
@@ -63,13 +63,13 @@ Check certificate status:
 
 ```bash
 # Check certificate status
-kubectl get certificates -n aws-iam-manager
+kubectl get certificates -n cloud-manager
 
 # Check certificate details
-kubectl describe certificate aws-iam-manager-cert -n aws-iam-manager
+kubectl describe certificate cloud-manager-cert -n cloud-manager
 
 # Check certificate secret
-kubectl get secret aws-iam-manager-tls -n aws-iam-manager
+kubectl get secret cloud-manager-tls -n cloud-manager
 ```
 
 ## Troubleshooting
@@ -83,10 +83,10 @@ If certificate status shows "Pending":
 kubectl logs -n cert-manager -l app=cert-manager
 
 # Check certificate events
-kubectl describe certificate aws-iam-manager-cert -n aws-iam-manager
+kubectl describe certificate cloud-manager-cert -n cloud-manager
 
 # Check challenge status
-kubectl get challenges -n aws-iam-manager
+kubectl get challenges -n cloud-manager
 ```
 
 ### Common Issues

@@ -4,7 +4,7 @@
       <div class="container">
         <div class="logo">
           <router-link to="/" class="logo-link">
-            <h1>Cloud IAM Manager</h1>
+            <h1>Cloud Manager</h1>
           </router-link>
         </div>
         <nav>

@@ -1,6 +1,6 @@
-# AWS IAM Manager
+# Cloud Manager
 
-A comprehensive web application for managing IAM users across multiple AWS accounts in an organization. Features automated StackSet deployment, cross-account role management, and a modern web interface. Built with Go backend and Vue.js frontend with Docker support.
+A comprehensive web application for managing cloud resources across AWS and Azure. Features multi-cloud resource management, automated deployments, cross-account role management, and a modern web interface. Built with Go backend and Vue.js frontend with Docker support.
 
 ## ✨ Features
 
@@ -127,7 +127,7 @@ To enable Azure AD Enterprise Applications management:
 1. **Register an Azure AD Application**:
    - Go to [Azure Portal](https://portal.azure.com) → Azure Active Directory → App registrations
    - Click "New registration"
-   - Name: `aws-iam-manager` (or your preferred name)
+   - Name: `cloud-manager` (or your preferred name)
    - Supported account types: Single tenant or Multi-tenant
    - Click "Register"
 
@@ -522,7 +522,7 @@ make logs
 **Container Won't Start**
 ```bash
 # Check container logs
-docker-compose logs aws-iam-manager
+docker-compose logs cloud-manager
 
 # Rebuild containers
 make clean
@@ -609,4 +609,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Made with ❤️ for AWS Organizations** - Simplifying cross-account IAM management
+**Made with ❤️ for Cloud Management** - Simplifying multi-cloud resource management

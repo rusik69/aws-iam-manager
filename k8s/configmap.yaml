@@ -2,9 +2,9 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: app-config
-  namespace: aws-iam-manager
+  namespace: cloud-manager
   labels:
-    app.kubernetes.io/name: aws-iam-manager
+    app.kubernetes.io/name: cloud-manager
     app.kubernetes.io/component: config
 data:
   AWS_REGION: "us-east-1"

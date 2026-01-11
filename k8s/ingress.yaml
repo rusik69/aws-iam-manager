@@ -1,10 +1,10 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: aws-iam-manager-ingress
-  namespace: aws-iam-manager
+  name: cloud-manager-ingress
+  namespace: cloud-manager
   labels:
-    app.kubernetes.io/name: aws-iam-manager
+    app.kubernetes.io/name: cloud-manager
     app.kubernetes.io/component: ingress
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
@@ -25,7 +25,7 @@ spec:
   tls:
   - hosts:
     - DOMAIN_PLACEHOLDER
-    secretName: aws-iam-manager-tls
+    secretName: cloud-manager-tls
   rules:
   # Primary domain (from HOST variable)
   - host: DOMAIN_PLACEHOLDER
@@ -35,7 +35,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: aws-iam-manager
+            name: cloud-manager
             port:
               number: 8080
   # For external access via IP or custom domain (configurable)
@@ -46,7 +46,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: aws-iam-manager
+            name: cloud-manager
             port:
               number: 8080
   # For local testing and direct IP access
@@ -56,6 +56,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: aws-iam-manager
+            name: cloud-manager
             port:
               number: 8080

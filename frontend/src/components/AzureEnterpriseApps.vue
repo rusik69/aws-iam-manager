@@ -106,7 +106,10 @@
               <th>Application ID</th>
               <th>Type</th>
               <th>Status</th>
-              <th>Created</th>
+              <th @click="sortBy('created_datetime')" class="sortable">
+                Created
+                <span class="sort-indicator" v-if="sortField === 'created_datetime'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
+              </th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -277,7 +280,9 @@ export default {
       appToDelete: null,
       selectedApp: null,
       deleting: false,
-      azureConfigured: true
+      azureConfigured: true,
+      sortField: 'created_datetime',
+      sortDirection: 'desc'
     }
   },
   computed: {
@@ -300,6 +305,39 @@ export default {
           app.service_principal_type.toLowerCase().includes(query)
         )
       }
+
+      // Apply sorting
+      filtered.sort((a, b) => {
+        let aVal = a[this.sortField]
+        let bVal = b[this.sortField]
+
+        // Handle null/undefined values
+        if (aVal == null && bVal == null) return 0
+        if (aVal == null) return 1
+        if (bVal == null) return -1
+
+        // Handle date/time fields
+        if (this.sortField === 'created_datetime') {
+          aVal = new Date(aVal).getTime()
+          bVal = new Date(bVal).getTime()
+        }
+        // Handle string fields - convert to lowercase for case-insensitive comparison
+        else if (typeof aVal === 'string' || typeof bVal === 'string') {
+          aVal = String(aVal || '').toLowerCase()
+          bVal = String(bVal || '').toLowerCase()
+        }
+
+        // Perform comparison
+        let comparison = 0
+        if (aVal < bVal) {
+          comparison = -1
+        } else if (aVal > bVal) {
+          comparison = 1
+        }
+
+        // Reverse if descending
+        return this.sortDirection === 'asc' ? comparison : -comparison
+      })
 
       return filtered
     },
@@ -377,6 +415,14 @@ export default {
       link.download = `azure-enterprise-apps-${new Date().toISOString()}.json`
       link.click()
       URL.revokeObjectURL(url)
+    },
+    sortBy(field) {
+      if (this.sortField === field) {
+        this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc'
+      } else {
+        this.sortField = field
+        this.sortDirection = field === 'created_datetime' ? 'desc' : 'asc'
+      }
     },
     formatDate(dateString) {
       if (!dateString) {
@@ -609,6 +655,21 @@ export default {
   letter-spacing: 0.05em;
   color: var(--color-text-secondary);
   border-bottom: 1px solid var(--color-border);
+}
+
+.apps-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition-fast);
+}
+
+.apps-table th.sortable:hover {
+  color: var(--color-btn-primary);
+}
+
+.sort-indicator {
+  margin-left: 0.5rem;
+  color: var(--color-btn-primary);
 }
 
 .apps-table td {
