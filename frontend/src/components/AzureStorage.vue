@@ -486,6 +486,7 @@ export default {
 
 .data-table {
   width: 100%;
+  min-width: 800px;
   border-collapse: collapse;
 }
 

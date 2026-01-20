@@ -129,6 +129,7 @@ type EC2Instance struct {
 	InstanceType string    `json:"instance_type"` // Flavor
 	LaunchTime   time.Time `json:"launch_time"`
 	State        string    `json:"state"` // running, stopped, etc.
+	MonthlyCost  float64   `json:"monthly_cost"` // Estimated monthly cost in USD (for running instances)
 	Tags         []Tag     `json:"tags,omitempty"`
 }
 
@@ -148,6 +149,7 @@ type EBSVolume struct {
 	IOPS             int64              `json:"iops,omitempty"`
 	Throughput       int64              `json:"throughput,omitempty"` // MB/s (for gp3)
 	SnapshotID       string             `json:"snapshot_id,omitempty"`
+	MonthlyCost      float64            `json:"monthly_cost"` // Estimated monthly cost in USD
 	Attachments      []VolumeAttachment `json:"attachments,omitempty"`
 	Tags             []Tag              `json:"tags,omitempty"`
 }

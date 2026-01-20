@@ -844,12 +844,14 @@ export default {
 .table-container {
   background: var(--color-bg-primary);
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .data-table {
   width: 100%;
+  min-width: 800px;
   border-collapse: collapse;
 }
 

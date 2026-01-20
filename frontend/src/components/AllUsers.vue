@@ -1042,11 +1042,13 @@ export default {
   background: var(--color-bg-primary);
   border-radius: 0.75rem;
   border: 1px solid var(--color-border);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .users-table {
   width: 100%;
+  min-width: 900px;
   border-collapse: collapse;
   font-size: 0.875rem;
 }

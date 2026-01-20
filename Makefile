@@ -147,6 +147,7 @@ build-release:
 # For Docker Desktop, minikube (with eval $(minikube docker-env)), or kind (with kind load)
 dev:
 	@echo "🚀 Starting development environment in Kubernetes..."
+	@echo "🧹 Unsetting AWS environment variables..."
 	@if [ ! -f .env.prod ]; then \
 		echo "❌ Error: .env.prod file not found. Create it with your environment variables."; \
 		exit 1; \
@@ -154,12 +155,14 @@ dev:
 	@echo "📦 Building frontend..."
 	@cd frontend && npm run build
 	@echo "🐳 Building Docker image locally (no cache)..."
-	@DOCKER_BUILDKIT=1 docker build \
+	@(unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_REGION AWS_PROFILE AWS_DEFAULT_REGION AWS_SSO_REGION; \
+	DOCKER_BUILDKIT=1 docker build \
 		--no-cache \
 		--build-arg BUILDKIT_INLINE_CACHE=1 \
 		--network=host \
-		-t cloud-manager:dev . || \
+		-t cloud-manager:dev .) || \
 		(echo "❌ Docker build failed. Trying without network isolation..." && \
+		 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_REGION AWS_PROFILE AWS_DEFAULT_REGION AWS_SSO_REGION && \
 		 docker build --no-cache --network=host -t cloud-manager:dev .)
 	@echo "☸️  Deploying to Kubernetes cluster..."
 	@kubectl apply -f k8s/namespace.yaml
@@ -413,10 +416,35 @@ deploy-user: build-cli
 	else \
 		echo "⚠️  Warning: /tmp/iam-manager.env not found, .env.prod not created"; \
 	fi
+	@echo "🔐 Attaching SSO policy to IAM user..."
+	@USER_NAME=$${IAM_USER_NAME:-iam-manager}; \
+	POLICY_FILE="cloudformation/iam-manager-user-sso-policy.json"; \
+	if [ -f "$$POLICY_FILE" ]; then \
+		if aws iam put-user-policy \
+			--user-name "$$USER_NAME" \
+			--policy-name SSOIdentityCenterManagement \
+			--policy-document "file://$$POLICY_FILE" 2>/dev/null; then \
+			echo "✅ SSO policy attached successfully"; \
+		else \
+			echo "⚠️  Warning: Failed to attach SSO policy. You may need to attach it manually:"; \
+			echo "   aws iam put-user-policy --user-name $$USER_NAME --policy-name SSOIdentityCenterManagement --policy-document file://$$POLICY_FILE"; \
+		fi \
+	else \
+		echo "⚠️  Warning: SSO policy file not found at $$POLICY_FILE"; \
+	fi
 
 # Remove IAM user and resources
 remove-user: build-cli
 	@echo "🗑️  Removing IAM user and resources..."
+	@USER_NAME=$${IAM_USER_NAME:-iam-manager}; \
+	echo "🗑️  Removing SSO policy from IAM user..."; \
+	if aws iam delete-user-policy \
+		--user-name "$$USER_NAME" \
+		--policy-name SSOIdentityCenterManagement 2>/dev/null; then \
+		echo "✅ SSO policy removed"; \
+	else \
+		echo "ℹ️  SSO policy not found or already removed"; \
+	fi
 	@if [ -f bin/iam-manager ]; then \
 		./bin/iam-manager remove; \
 	elif command -v go >/dev/null 2>&1; then \

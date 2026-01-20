@@ -1,7 +1,7 @@
 <template>
   <div class="security-group-detail">
     <nav class="breadcrumb">
-      <router-link to="/security-groups">← Back to Security Groups</router-link>
+      <router-link to="/aws/security-groups">← Back to Security Groups</router-link>
     </nav>
 
     <h1>Security Group Detail</h1>

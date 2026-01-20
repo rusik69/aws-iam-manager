@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/rusik69/aws-iam-manager/internal/models"
 
@@ -243,6 +244,78 @@ func (s *AWSService) updateSnapshotCache(accountID, snapshotID string) {
 			s.cache.Set("snapshots", updated, s.cacheTTL)
 		}
 	}
+}
+
+// DeleteOldSnapshots deletes all snapshots older than the specified number of months for an account
+func (s *AWSService) DeleteOldSnapshots(accountID string, olderThanMonths int) ([]string, error) {
+	// Get all snapshots for the account
+	snapshots, err := s.ListSnapshotsByAccount(accountID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list snapshots: %w", err)
+	}
+
+	// Calculate cutoff date
+	cutoffDate := time.Now().AddDate(0, -olderThanMonths, 0)
+
+	// Filter snapshots older than cutoff
+	var oldSnapshots []models.Snapshot
+	for _, snap := range snapshots {
+		if snap.StartTime.Before(cutoffDate) && snap.State == "completed" {
+			oldSnapshots = append(oldSnapshots, snap)
+		}
+	}
+
+	if len(oldSnapshots) == 0 {
+		return []string{}, nil
+	}
+
+	// Delete snapshots in parallel
+	type deleteResult struct {
+		snapshotID string
+		err        error
+	}
+
+	resultChan := make(chan deleteResult, len(oldSnapshots))
+	var wg sync.WaitGroup
+
+	for _, snap := range oldSnapshots {
+		wg.Add(1)
+		go func(snapshot models.Snapshot) {
+			defer wg.Done()
+			err := s.DeleteSnapshot(accountID, snapshot.Region, snapshot.SnapshotID)
+			resultChan <- deleteResult{
+				snapshotID: snapshot.SnapshotID,
+				err:        err,
+			}
+		}(snap)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var deletedSnapshots []string
+	var errors []error
+	for result := range resultChan {
+		if result.err != nil {
+			errors = append(errors, fmt.Errorf("failed to delete snapshot %s: %w", result.snapshotID, result.err))
+		} else {
+			deletedSnapshots = append(deletedSnapshots, result.snapshotID)
+		}
+	}
+
+	// If there were any errors, return them
+	if len(errors) > 0 {
+		errMsg := fmt.Sprintf("deleted %d snapshots, but encountered %d errors", len(deletedSnapshots), len(errors))
+		for _, e := range errors {
+			errMsg += "; " + e.Error()
+		}
+		return deletedSnapshots, fmt.Errorf(errMsg)
+	}
+
+	return deletedSnapshots, nil
 }
 
 // InvalidateSnapshotsCache invalidates the snapshots cache

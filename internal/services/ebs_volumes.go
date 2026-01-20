@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/rusik69/aws-iam-manager/internal/models"
@@ -13,6 +14,71 @@ import (
 // ============================================================================
 // EBS VOLUME MANAGEMENT
 // ============================================================================
+
+// calculateEBSVolumeMonthlyCost calculates the monthly cost for an EBS volume
+// Based on AWS EBS pricing (2024-2025):
+// - gp3: $0.08/GB-month (includes 3,000 IOPS and 125 MB/s)
+// - gp2: $0.10/GB-month
+// - io2: $0.125/GB-month + IOPS costs
+// - io1: $0.125/GB-month + IOPS costs
+// - st1: $0.045/GB-month
+// - sc1: $0.025/GB-month
+// - standard: $0.05/GB-month (magnetic)
+func calculateEBSVolumeMonthlyCost(volumeType string, sizeGB int64, iops int64, throughputMBs int64) float64 {
+	size := float64(sizeGB)
+	var cost float64
+
+	switch volumeType {
+	case "gp3":
+		// Base storage cost: $0.08 per GB-month
+		cost = size * 0.08
+		// Additional IOPS cost: $0.005 per IOPS-month over 3,000
+		if iops > 3000 {
+			cost += float64(iops-3000) * 0.005
+		}
+		// Additional throughput cost: $0.04 per MB/s-month over 125
+		if throughputMBs > 125 {
+			cost += float64(throughputMBs-125) * 0.04
+		}
+	case "gp2":
+		// $0.10 per GB-month
+		cost = size * 0.10
+	case "io2":
+		// Base storage cost: $0.125 per GB-month
+		cost = size * 0.125
+		// IOPS cost based on tiered pricing
+		if iops > 0 {
+			if iops <= 32000 {
+				cost += float64(iops) * 0.065
+			} else if iops <= 64000 {
+				cost += float64(32000)*0.065 + float64(iops-32000)*0.046
+			} else {
+				cost += float64(32000)*0.065 + float64(32000)*0.046 + float64(iops-64000)*0.032
+			}
+		}
+	case "io1":
+		// Base storage cost: $0.125 per GB-month
+		cost = size * 0.125
+		// IOPS cost: $0.065 per IOPS-month
+		if iops > 0 {
+			cost += float64(iops) * 0.065
+		}
+	case "st1":
+		// $0.045 per GB-month
+		cost = size * 0.045
+	case "sc1":
+		// $0.025 per GB-month
+		cost = size * 0.025
+	case "standard":
+		// Magnetic: $0.05 per GB-month
+		cost = size * 0.05
+	default:
+		// Default to gp2 pricing for unknown types
+		cost = size * 0.10
+	}
+
+	return math.Round(cost*100) / 100 // Round to 2 decimal places
+}
 
 func (s *AWSService) ListEBSVolumes() ([]models.EBSVolume, error) {
 	const cacheKey = "ebs-volumes"
@@ -182,30 +248,42 @@ func (s *AWSService) ListEBSVolumesByAccount(accountID string) ([]models.EBSVolu
 					attachments = append(attachments, attachment)
 				}
 
+				// Extract volume properties
+				size := aws.Int64Value(vol.Size)
+				volumeType := aws.StringValue(vol.VolumeType)
+				var iops int64
+				var throughput int64
+				if vol.Iops != nil {
+					iops = *vol.Iops
+				}
+				if vol.Throughput != nil {
+					throughput = *vol.Throughput
+				}
+
+				// Calculate monthly cost
+				monthlyCost := calculateEBSVolumeMonthlyCost(volumeType, size, iops, throughput)
+
 				volume := models.EBSVolume{
 					VolumeID:         aws.StringValue(vol.VolumeId),
 					Name:             volumeName,
 					AccountID:        accountID,
 					AccountName:      accountName,
 					Region:           r,
-					Size:             aws.Int64Value(vol.Size),
-					VolumeType:       aws.StringValue(vol.VolumeType),
+					Size:             size,
+					VolumeType:       volumeType,
 					State:            aws.StringValue(vol.State),
 					AvailabilityZone: aws.StringValue(vol.AvailabilityZone),
 					Encrypted:        aws.BoolValue(vol.Encrypted),
 					SnapshotID:       aws.StringValue(vol.SnapshotId),
+					IOPS:             iops,
+					Throughput:       throughput,
+					MonthlyCost:      monthlyCost,
 					Attachments:      attachments,
 					Tags:             tags,
 				}
 
 				if vol.CreateTime != nil {
 					volume.CreateTime = *vol.CreateTime
-				}
-				if vol.Iops != nil {
-					volume.IOPS = *vol.Iops
-				}
-				if vol.Throughput != nil {
-					volume.Throughput = *vol.Throughput
 				}
 
 				regionVolumes = append(regionVolumes, volume)

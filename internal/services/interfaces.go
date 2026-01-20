@@ -27,6 +27,7 @@ type AWSServiceInterface interface {
 	ListSnapshots() ([]models.Snapshot, error)
 	ListSnapshotsByAccount(accountID string) ([]models.Snapshot, error)
 	DeleteSnapshot(accountID, region, snapshotID string) error
+	DeleteOldSnapshots(accountID string, olderThanMonths int) ([]string, error)
 	// EC2 instance management
 	ListEC2Instances() ([]models.EC2Instance, error)
 	StopEC2Instance(accountID, region, instanceID string) error
@@ -99,4 +100,26 @@ type AzureRMServiceInterface interface {
 	ClearCache()
 	InvalidateVMsCache()
 	InvalidateStorageCache()
+}
+
+type SSOServiceInterface interface {
+	GetIdentityCenterInstance() (*models.SSOIdentityCenterInstance, error)
+	ListSSOUsers() ([]models.SSOUser, error)
+	ListSSOGroups() ([]models.SSOGroup, error)
+	GetSSOUser(userID string) (*models.SSOUser, error)
+	GetSSOGroup(groupID string) (*models.SSOGroup, error)
+	ListGroupMembers(groupID string) ([]models.SSOGroupMember, error)
+	ListAccountAssignments(accountID string) ([]models.SSOAccountAssignment, error)
+	ListAccountAssignmentsForUser(userID string) ([]models.SSOAccountAssignment, error)
+	ListAccountAssignmentsForGroup(groupID string) ([]models.SSOAccountAssignment, error)
+	ListAllUserAssignments() ([]models.SSOUserWithAssignments, error)
+	ListAllGroupAssignments() ([]models.SSOGroupWithAssignments, error)
+	ListAllAccountAssignments() ([]models.SSOAccountWithAssignments, error)
+	// Cache management methods
+	ClearCache()
+	InvalidateSSOUsersCache()
+	InvalidateSSOGroupsCache()
+	InvalidateSSOUserCache(userID string)
+	InvalidateSSOGroupCache(groupID string)
+	InvalidateAccountAssignmentsCache(accountID string)
 }

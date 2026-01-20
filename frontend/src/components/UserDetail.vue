@@ -2,7 +2,7 @@
   <div>
     <div class="card">
       <nav>
-        <router-link to="/">← All Users</router-link> / 
+        <router-link to="/aws/users">← All Users</router-link> / 
         <span v-if="account">{{ account.name }}</span><span v-else>{{ accountId }}</span> / 
         {{ username }}
       </nav>

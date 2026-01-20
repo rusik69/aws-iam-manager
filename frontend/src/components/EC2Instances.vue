@@ -11,7 +11,12 @@
           </div>
           <div class="title-content">
             <h1>EC2 Instances</h1>
-            <p>{{ instances.length }} instances across {{ uniqueAccounts.length }} accounts</p>
+            <p v-if="filterAccount">
+              {{ filteredInstances.length }} instance{{ filteredInstances.length !== 1 ? 's' : '' }} in {{ selectedAccountName }}
+            </p>
+            <p v-else>
+              {{ instances.length }} instances across {{ uniqueAccounts.length }} accounts
+            </p>
           </div>
         </div>
         <div class="header-actions">
@@ -65,11 +70,11 @@
       <!-- Summary Stats -->
       <div class="summary-stats">
         <div class="stat-card">
-          <div class="stat-value">{{ instances.length }}</div>
-          <div class="stat-label">Total Instances</div>
+          <div class="stat-value">{{ filterAccount ? filteredInstances.length : instances.length }}</div>
+          <div class="stat-label">{{ filterAccount ? 'Instances' : 'Total Instances' }}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">{{ runningInstances }}</div>
+          <div class="stat-value">{{ filterAccount ? filteredRunningInstances : runningInstances }}</div>
           <div class="stat-label">Running</div>
         </div>
         <div class="stat-card stat-card-stopped">
@@ -77,11 +82,15 @@
           <div class="stat-label">Stopped</div>
         </div>
         <div class="stat-card">
+          <div class="stat-value">{{ formatCurrency(filterAccount ? filteredTotalMonthlyCost : totalMonthlyCost) }}</div>
+          <div class="stat-label">Monthly Cost</div>
+        </div>
+        <div class="stat-card" v-if="!filterAccount">
           <div class="stat-value">{{ uniqueAccounts.length }}</div>
           <div class="stat-label">Accounts</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">{{ uniqueRegions.length }}</div>
+          <div class="stat-value">{{ filterAccount ? filteredUniqueRegions.length : uniqueRegions.length }}</div>
           <div class="stat-label">Regions</div>
         </div>
       </div>
@@ -155,6 +164,10 @@
                 Flavor
                 <span class="sort-indicator" v-if="sortField === 'instance_type'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
               </th>
+              <th @click="sortBy('monthly_cost')" class="sortable">
+                Monthly Cost
+                <span class="sort-indicator" v-if="sortField === 'monthly_cost'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
+              </th>
               <th @click="sortBy('launch_time')" class="sortable">
                 Launch Date
                 <span class="sort-indicator" v-if="sortField === 'launch_time'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
@@ -178,6 +191,9 @@
               </td>
               <td>{{ instance.region }}</td>
               <td>{{ instance.instance_type }}</td>
+              <td>
+                <span class="cost-value">{{ formatCurrency(instance.monthly_cost || 0) }}</span>
+              </td>
               <td>
                 <div class="date-info">
                   <div class="date-value">{{ formatDate(instance.launch_time) }}</div>
@@ -259,6 +275,18 @@ export default {
     runningInstances() {
       return this.instances.filter(i => i.state === 'running').length
     },
+    filteredRunningInstances() {
+      return this.filteredInstances.filter(i => i.state === 'running').length
+    },
+    totalMonthlyCost() {
+      return this.instances.reduce((sum, i) => sum + (i.monthly_cost || 0), 0)
+    },
+    filteredTotalMonthlyCost() {
+      return this.filteredInstances.reduce((sum, i) => sum + (i.monthly_cost || 0), 0)
+    },
+    filteredUniqueRegions() {
+      return [...new Set(this.filteredInstances.map(i => i.region))].sort()
+    },
     stoppedInstancesCount() {
       // If account filter is set, only count instances from that account
       let instancesToCheck = this.instances
@@ -315,6 +343,9 @@ export default {
         if (this.sortField === 'launch_time') {
           aVal = new Date(aVal)
           bVal = new Date(bVal)
+        } else if (this.sortField === 'monthly_cost') {
+          aVal = aVal || 0
+          bVal = bVal || 0
         } else if (typeof aVal === 'string') {
           aVal = aVal?.toLowerCase() || ''
           bVal = bVal?.toLowerCase() || ''
@@ -383,6 +414,14 @@ export default {
       if (diffDays < 30) return `${diffDays} days ago`
       if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`
       return `${Math.floor(diffDays / 365)} years ago`
+    },
+    formatCurrency(amount) {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(amount)
     },
     downloadJSON() {
       try {
@@ -821,7 +860,8 @@ export default {
 .table-container {
   background: var(--color-bg-primary);
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
@@ -859,6 +899,7 @@ export default {
 
 .instances-table {
   width: 100%;
+  min-width: 1000px;
   border-collapse: collapse;
 }
 
@@ -938,6 +979,13 @@ export default {
 .date-relative {
   font-size: 0.85rem;
   color: var(--color-text-secondary);
+}
+
+.cost-value {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.875rem;
 }
 
 .state-badge {

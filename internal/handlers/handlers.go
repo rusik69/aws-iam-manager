@@ -565,6 +565,57 @@ func (h *Handler) DeleteSnapshot(c *gin.Context) {
 	})
 }
 
+func (h *Handler) DeleteOldSnapshots(c *gin.Context) {
+	accountID := c.Param("accountId")
+	olderThanMonthsStr := c.DefaultQuery("older_than_months", "6")
+
+	if accountID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Account ID is required",
+		})
+		return
+	}
+
+	var olderThanMonths int
+	if _, err := fmt.Sscanf(olderThanMonthsStr, "%d", &olderThanMonths); err != nil || olderThanMonths <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "older_than_months must be a positive integer",
+		})
+		return
+	}
+
+	deletedSnapshots, err := h.awsService.DeleteOldSnapshots(accountID, olderThanMonths)
+	if err != nil {
+		fmt.Printf("[ERROR] DeleteOldSnapshots failed for account %s: %v\n", accountID, err)
+		
+		// If some snapshots were deleted, return partial success
+		if len(deletedSnapshots) > 0 {
+			c.JSON(http.StatusPartialContent, gin.H{
+				"message":          fmt.Sprintf("Deleted %d snapshots, but encountered errors", len(deletedSnapshots)),
+				"deleted_snapshots": deletedSnapshots,
+				"error":             err.Error(),
+			})
+			return
+		}
+
+		statusCode := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "cannot access account") {
+			statusCode = http.StatusForbidden
+		}
+
+		c.JSON(statusCode, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":          fmt.Sprintf("Successfully deleted %d snapshot(s) older than %d months", len(deletedSnapshots), olderThanMonths),
+		"deleted_snapshots": deletedSnapshots,
+		"count":            len(deletedSnapshots),
+	})
+}
+
 // ============================================================================
 // EC2 INSTANCE HANDLERS
 // ============================================================================

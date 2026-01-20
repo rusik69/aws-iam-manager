@@ -17,6 +17,7 @@ A comprehensive web application for managing cloud resources across AWS and Azur
 - **📈 Real-time Monitoring**: Track StackSet deployment progress across all accounts
 - **🌙 Dark/Light Theme**: Modern responsive UI with theme switching
 - **🛡️ Security**: External ID protection and least privilege permissions
+- **🔐 AWS SSO (IAM Identity Center) Management**: View SSO users, groups, and account assignments
 - **☁️ Azure AD Integration**: Manage Azure AD Enterprise Applications (optional)
 
 ## 🏗️ Architecture
@@ -35,6 +36,16 @@ A comprehensive web application for managing cloud resources across AWS and Azur
    - Assume roles in target accounts (`sts:AssumeRole`)
    - CloudFormation StackSets operations (for automated role deployment)
    - Organizations service access
+   - IAM Identity Center (SSO) management (if using SSO features):
+     - `sso:ListInstances`
+     - `identitystore:ListUsers`, `identitystore:DescribeUser`
+     - `identitystore:ListGroups`, `identitystore:DescribeGroup`
+     - `identitystore:ListGroupMemberships`
+     - `sso:ListPermissionSets`, `sso:DescribePermissionSet`
+     - `sso:ListAccountAssignments`, `sso:ListAccountAssignmentsForPrincipal`
+     - `sso:ListManagedPoliciesInPermissionSet`, `sso:GetInlinePolicyForPermissionSet`
+   
+   **Note**: SSO permissions must be attached directly to the IAM user in the master account (not just the cross-account role). See [SSO Setup](#sso-setup) section below.
 3. **Target account roles** (`IAMManagerCrossAccountRole`) **OR** use our automated StackSet deployment
 4. **Docker and Docker Compose** (for containerized deployment)
 5. **Go 1.21+** (for CLI and local development)
@@ -101,6 +112,7 @@ Copy `.env.example` to `.env` and configure:
 AWS_ACCESS_KEY_ID=your_access_key_here
 AWS_SECRET_ACCESS_KEY=your_secret_key_here
 AWS_REGION=us-east-1
+AWS_SSO_REGION=eu-west-2  # Region for IAM Identity Center (SSO) management (defaults to eu-west-2)
 
 # Optional IAM configuration
 IAM_ORG_ROLE_NAME=IAMManagerCrossAccountRole
@@ -166,6 +178,58 @@ To enable Azure AD Enterprise Applications management:
    - Navigate to "Azure Apps" tab in the web interface
 
 **Note**: Azure features are optional. The application will work without Azure credentials, but Azure endpoints will not be available.
+
+### SSO Setup (IAM Identity Center)
+
+To enable AWS SSO (IAM Identity Center) management features:
+
+1. **Ensure IAM Identity Center is enabled** in your AWS Organization:
+   - Go to AWS Console → IAM Identity Center
+   - If not enabled, follow the setup wizard to enable it
+
+2. **Attach SSO permissions to your IAM user** in the master account:
+   
+   The IAM user (e.g., `iam-manager`) needs SSO permissions directly attached, as SSO operations are performed in the master account context.
+   
+   **Option A: Using AWS CLI** (Recommended):
+   ```bash
+   # Attach the SSO policy to your IAM user
+   aws iam put-user-policy \
+     --user-name iam-manager \
+     --policy-name SSOIdentityCenterManagement \
+     --policy-document file://cloudformation/iam-manager-user-sso-policy.json
+   ```
+   
+   **Option B: Using AWS Console**:
+   - Go to IAM → Users → `iam-manager` → Permissions
+   - Click "Add permissions" → "Create inline policy"
+   - Choose JSON tab
+   - Copy the contents from `cloudformation/iam-manager-user-sso-policy.json`
+   - Review and create the policy
+   
+   **Option C: Using CloudFormation** (if you prefer IaC):
+   ```bash
+   # Create a stack that attaches the policy
+   aws cloudformation create-stack \
+     --stack-name iam-manager-user-sso-policy \
+     --template-body file://cloudformation/iam-manager-user-sso-policy.yaml \
+     --parameters ParameterKey=UserName,ParameterValue=iam-manager
+   ```
+
+3. **Set the SSO region** (if different from default):
+   ```bash
+   export AWS_SSO_REGION=eu-west-2  # Default is eu-west-2 (London)
+   ```
+   
+   Or add to your `.env.prod` file or Kubernetes secrets.
+
+4. **Verify Setup**:
+   - Restart the application: `make dev`
+   - Check logs for: `[INFO] SSO service initialized successfully`
+   - Navigate to "SSO Users" or "SSO Groups" in the web interface
+   - If you see an error, check the `/api/sso/status` endpoint for details
+
+**Note**: SSO features are optional. The application will work without SSO permissions, but SSO endpoints will return error messages indicating the service is unavailable.
 
 ### Azure Resource Manager Setup (Optional)
 

@@ -635,13 +635,15 @@ export default {
 .apps-table-container {
   background: var(--color-bg-primary);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   box-shadow: var(--shadow);
   border: 1px solid var(--color-border-light);
 }
 
 .apps-table {
   width: 100%;
+  min-width: 900px;
   border-collapse: collapse;
 }
 

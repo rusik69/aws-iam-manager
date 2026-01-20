@@ -11,7 +11,12 @@
           </div>
           <div class="title-content">
             <h1>EBS Volumes</h1>
-            <p>{{ volumes.length }} volumes across {{ uniqueAccounts.length }} accounts</p>
+            <p v-if="filterAccount">
+              {{ filteredVolumes.length }} volume{{ filteredVolumes.length !== 1 ? 's' : '' }} in {{ selectedAccountName }}
+            </p>
+            <p v-else>
+              {{ volumes.length }} volumes across {{ uniqueAccounts.length }} accounts
+            </p>
           </div>
         </div>
         <div class="header-actions">
@@ -92,11 +97,19 @@
           <div class="stat-label">Available (6+ months)</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">{{ totalSize }} GiB</div>
-          <div class="stat-label">Total Size</div>
+          <div class="stat-value">{{ filterAccount ? filteredTotalSize : totalSize }} GiB</div>
+          <div class="stat-label">{{ filterAccount ? 'Total Size' : 'Total Size' }}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">{{ uniqueRegions.length }}</div>
+          <div class="stat-value">{{ formatCurrency(filterAccount ? filteredTotalMonthlyCost : totalMonthlyCost) }}</div>
+          <div class="stat-label">Monthly Cost</div>
+        </div>
+        <div class="stat-card" v-if="!filterAccount">
+          <div class="stat-value">{{ uniqueAccounts.length }}</div>
+          <div class="stat-label">Accounts</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ filterAccount ? filteredUniqueRegions.length : uniqueRegions.length }}</div>
           <div class="stat-label">Regions</div>
         </div>
       </div>
@@ -132,6 +145,16 @@
           <option value="in-use">In Use</option>
           <option value="creating">Creating</option>
           <option value="deleting">Deleting</option>
+        </select>
+        <select v-model="filterVolumeType" class="filter-select">
+          <option value="">All Types</option>
+          <option value="gp3">gp3</option>
+          <option value="gp2">gp2</option>
+          <option value="io2">io2</option>
+          <option value="io1">io1</option>
+          <option value="st1">st1</option>
+          <option value="sc1">sc1</option>
+          <option value="standard">standard</option>
         </select>
       </div>
 
@@ -173,6 +196,10 @@
                 Type
                 <span class="sort-indicator" v-if="sortField === 'volume_type'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
               </th>
+              <th @click="sortBy('monthly_cost')" class="sortable">
+                Monthly Cost
+                <span class="sort-indicator" v-if="sortField === 'monthly_cost'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
+              </th>
               <th @click="sortBy('state')" class="sortable">
                 Status
                 <span class="sort-indicator" v-if="sortField === 'state'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
@@ -199,6 +226,9 @@
               <td>{{ volume.size }}</td>
               <td>
                 <span class="type-badge">{{ volume.volume_type }}</span>
+              </td>
+              <td>
+                <span class="cost-value">{{ formatCurrency(volume.monthly_cost || 0) }}</span>
               </td>
               <td>
                 <span :class="['state-badge', `state-${volume.state}`]">
@@ -284,6 +314,7 @@ export default {
       filterAccount: '',
       filterRegion: '',
       filterState: '',
+      filterVolumeType: '',
       sortField: 'create_time',
       sortDirection: 'desc'
     }
@@ -300,11 +331,6 @@ export default {
     },
     uniqueRegions() {
       return [...new Set(this.volumes.map(v => v.region))].sort()
-    },
-    selectedAccountName() {
-      if (!this.filterAccount) return ''
-      const account = this.uniqueAccounts.find(a => a.id === this.filterAccount)
-      return account ? account.name : this.filterAccount
     },
     inUseVolumes() {
       return this.volumes.filter(v => v.state === 'in-use').length
@@ -358,6 +384,23 @@ export default {
     totalSize() {
       return this.volumes.reduce((sum, v) => sum + v.size, 0)
     },
+    filteredTotalSize() {
+      return this.filteredVolumes.reduce((sum, v) => sum + v.size, 0)
+    },
+    totalMonthlyCost() {
+      return this.volumes.reduce((sum, v) => sum + (v.monthly_cost || 0), 0)
+    },
+    filteredTotalMonthlyCost() {
+      return this.filteredVolumes.reduce((sum, v) => sum + (v.monthly_cost || 0), 0)
+    },
+    filteredUniqueRegions() {
+      return [...new Set(this.filteredVolumes.map(v => v.region))].sort()
+    },
+    selectedAccountName() {
+      if (!this.filterAccount) return ''
+      const account = this.uniqueAccounts.find(a => a.id === this.filterAccount)
+      return account ? `${account.name} (${account.id})` : this.filterAccount
+    },
     filteredVolumes() {
       let result = this.volumes
 
@@ -384,6 +427,9 @@ export default {
       if (this.filterState) {
         result = result.filter(v => v.state === this.filterState)
       }
+      if (this.filterVolumeType) {
+        result = result.filter(v => v.volume_type === this.filterVolumeType)
+      }
 
       // Apply sorting
       result.sort((a, b) => {
@@ -393,6 +439,9 @@ export default {
         if (this.sortField === 'create_time') {
           aVal = new Date(aVal)
           bVal = new Date(bVal)
+        } else if (this.sortField === 'monthly_cost' || this.sortField === 'size') {
+          aVal = aVal || 0
+          bVal = bVal || 0
         } else if (typeof aVal === 'string') {
           aVal = aVal?.toLowerCase() || ''
           bVal = bVal?.toLowerCase() || ''
@@ -732,6 +781,14 @@ export default {
         month: 'short',
         day: 'numeric'
       })
+    },
+    formatCurrency(amount) {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(amount)
     }
   }
 }
@@ -1034,7 +1091,8 @@ export default {
 .table-container {
   background: var(--color-bg-primary);
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
@@ -1072,6 +1130,7 @@ export default {
 
 .volumes-table {
   width: 100%;
+  min-width: 1000px;
   border-collapse: collapse;
 }
 
@@ -1205,6 +1264,13 @@ export default {
 .not-attached {
   color: var(--color-text-secondary);
   font-style: italic;
+}
+
+.cost-value {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.875rem;
 }
 
 .date-text {

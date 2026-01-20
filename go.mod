@@ -5,13 +5,19 @@ go 1.24.0
 toolchain go1.24.4
 
 require (
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.19.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.12.0
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5 v5.7.0
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage v1.8.1
 	github.com/aws/aws-sdk-go v1.49.0
 	github.com/aws/aws-sdk-go-v2 v1.39.0
 	github.com/aws/aws-sdk-go-v2/config v1.31.7
 	github.com/aws/aws-sdk-go-v2/service/cloudformation v1.66.1
 	github.com/aws/aws-sdk-go-v2/service/iam v1.47.4
+	github.com/aws/aws-sdk-go-v2/service/identitystore v1.30.0
 	github.com/aws/aws-sdk-go-v2/service/organizations v1.45.0
+	github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.30.0
 	github.com/aws/aws-sdk-go-v2/service/sts v1.38.3
 	github.com/gin-contrib/cors v1.4.0
 	github.com/gin-gonic/gin v1.10.1
@@ -23,11 +29,7 @@ require (
 )
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.19.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5 v5.7.0 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage v1.8.1 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.5.0 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.11 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.7 // indirect

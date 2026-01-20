@@ -1,0 +1,25 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowSSOIdentityCenterManagement",
+      "Effect": "Allow",
+      "Action": [
+        "sso:ListInstances",
+        "identitystore:ListUsers",
+        "identitystore:DescribeUser",
+        "identitystore:ListGroups",
+        "identitystore:DescribeGroup",
+        "identitystore:ListGroupMemberships",
+        "identitystore:IsMemberInGroups",
+        "sso:ListPermissionSets",
+        "sso:DescribePermissionSet",
+        "sso:ListAccountAssignments",
+        "sso:ListAccountAssignmentsForPrincipal",
+        "sso:ListManagedPoliciesInPermissionSet",
+        "sso:GetInlinePolicyForPermissionSet"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

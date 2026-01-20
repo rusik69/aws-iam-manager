@@ -8,6 +8,12 @@ github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 h1:9iefClla7iYpfYWdzPCRDo
 github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2/go.mod h1:XtLgD3ZD34DAaVIIAyG3objl5DynM3CQ/vMcbBNJZGI=
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5 v5.7.0 h1:LkHbJbgF3YyvC53aqYGR+wWQDn2Rdp9AQdGndf9QvY4=
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5 v5.7.0/go.mod h1:QyiQdW4f4/BIfB8ZutZ2s+28RAgfa/pT+zS++ZHyM1I=
+github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/internal/v2 v2.0.0 h1:PTFGRSlMKCQelWwxUyYVEUqseBJVemLyqWJjvMyt0do=
+github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/internal/v2 v2.0.0/go.mod h1:LRr2FzBTQlONPPa5HREE5+RjSCTXl7BwOvYOaWTqCaI=
+github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/internal/v3 v3.1.0 h1:2qsIIvxVT+uE6yrNldntJKlLRgxGbZ85kgtz5SNBhMw=
+github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/internal/v3 v3.1.0/go.mod h1:AW8VEadnhw9xox+VaVd9sP7NjzOAnaZBLRH6Tq3cJ38=
+github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups v1.0.0 h1:pPvTJ1dY0sA35JOeFq6TsY2xj6Z85Yo23Pj4wCCvu4o=
+github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups v1.0.0/go.mod h1:mLfWfj8v3jfWKsL9G4eoBoXVcsqcIUTapmdKy7uGOp0=
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0 h1:Dd+RhdJn0OTtVGaeDLZpcumkIVCtA/3/Fo42+eoYvVM=
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0/go.mod h1:5kakwfW5CjC9KK+Q4wjXAg+ShuIm2mBMua0ZFj2C8PE=
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage v1.8.1 h1:/Zt+cDPnpC3OVDm/JKLOs7M2DKmLRIIp3XIx9pHHiig=
@@ -36,6 +42,8 @@ github.com/aws/aws-sdk-go-v2/service/cloudformation v1.66.1 h1:5HZUkH4sPTJkivr07
 github.com/aws/aws-sdk-go-v2/service/cloudformation v1.66.1/go.mod h1:eTAwEMBFx1uY9cnjh98c1V7GFqftJRb5X3wrUW04BTg=
 github.com/aws/aws-sdk-go-v2/service/iam v1.47.4 h1:3jK50qpmtonshV/dumtlzZA/0i8vp8a0KqWThrXnhpI=
 github.com/aws/aws-sdk-go-v2/service/iam v1.47.4/go.mod h1:0y7wFmnEg9xTZxjmr2gHQ4xOHpCfrt70lFWTOAkrij4=
+github.com/aws/aws-sdk-go-v2/service/identitystore v1.30.0 h1:/hjYtl0PyFG3X4AU4npfYHQa7JKHz1X5y4Qg7Br+a4I=
+github.com/aws/aws-sdk-go-v2/service/identitystore v1.30.0/go.mod h1:qL3gyU/WyGQo1DscmhMiL8/oThY+PqEhKusqyONF5jU=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.1 h1:oegbebPEMA/1Jny7kvwejowCaHz1FWZAQ94WXFNCyTM=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.1/go.mod h1:kemo5Myr9ac0U9JfSjMo9yHLtw+pECEHsFtJ9tqCEI8=
 github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.7 h1:mLgc5QIgOy26qyh5bvW+nDoAppxgn3J2WV3m9ewq7+8=
@@ -44,6 +52,8 @@ github.com/aws/aws-sdk-go-v2/service/organizations v1.45.0 h1:pokghrmP5zmoAOwXuQ
 github.com/aws/aws-sdk-go-v2/service/organizations v1.45.0/go.mod h1:ot0vk4sn+d7lY8g6oI91XE41Vz74ZNnTH+7UrsIsJVg=
 github.com/aws/aws-sdk-go-v2/service/sso v1.29.2 h1:rcoTaYOhGE/zfxE1uR6X5fvj+uKkqeCNRE0rBbiQM34=
 github.com/aws/aws-sdk-go-v2/service/sso v1.29.2/go.mod h1:Ql6jE9kyyWI5JHn+61UT/Y5Z0oyVJGmgmJbZD5g4unY=
+github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.30.0 h1:/F4jzHdC1zssKQKieLl1pG60kuHVUsAqcL7zVCosb9s=
+github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.30.0/go.mod h1:znVkl7Y14sZKEL/sbRQ6qgD8wj8VdTcVVQp5iRaKXcc=
 github.com/aws/aws-sdk-go-v2/service/ssooidc v1.34.3 h1:BSIfeFtU9tlSt8vEYS7KzurMoAuYzYPWhcZiMtxVf2M=
 github.com/aws/aws-sdk-go-v2/service/ssooidc v1.34.3/go.mod h1:XclEty74bsGBCr1s0VSaA11hQ4ZidK4viWK7rRfO88I=
 github.com/aws/aws-sdk-go-v2/service/sts v1.38.3 h1:yEiZ0ztgji2GsCb/6uQSITXcGdtmWMfLRys0jJFiUkc=

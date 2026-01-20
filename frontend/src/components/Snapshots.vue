@@ -11,10 +11,26 @@
           </div>
           <div class="title-content">
             <h1>EBS Snapshots</h1>
-            <p>{{ snapshots.length }} snapshots across {{ uniqueAccounts.length }} accounts</p>
+            <p v-if="filterAccount">
+              {{ filteredSnapshots.length }} snapshot{{ filteredSnapshots.length !== 1 ? 's' : '' }} in {{ selectedAccountName }}
+            </p>
+            <p v-else>
+              {{ snapshots.length }} snapshots across {{ uniqueAccounts.length }} accounts
+            </p>
           </div>
         </div>
         <div class="header-actions">
+          <button 
+            v-if="filterAccount" 
+            @click="deleteOldSnapshots" 
+            class="btn btn-danger" 
+            :disabled="loading || deletingOldSnapshots || oldSnapshotsCount === 0"
+          >
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+            {{ deletingOldSnapshots ? 'Deleting...' : `Delete ${oldSnapshotsCount} Old Snapshots` }}
+          </button>
           <button @click="downloadJSON" class="btn btn-success" :disabled="loading || snapshots.length === 0">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
               <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
@@ -54,19 +70,19 @@
       <!-- Summary Stats -->
       <div class="summary-stats">
         <div class="stat-card">
-          <div class="stat-value">{{ snapshots.length }}</div>
-          <div class="stat-label">Total Snapshots</div>
+          <div class="stat-value">{{ filterAccount ? filteredSnapshots.length : snapshots.length }}</div>
+          <div class="stat-label">{{ filterAccount ? 'Snapshots' : 'Total Snapshots' }}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">{{ totalSizeGB }} GB</div>
-          <div class="stat-label">Total Size</div>
+          <div class="stat-value">{{ filterAccount ? filteredTotalSizeGB : totalSizeGB }} GB</div>
+          <div class="stat-label">{{ filterAccount ? 'Total Size' : 'Total Size' }}</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" v-if="!filterAccount">
           <div class="stat-value">{{ uniqueAccounts.length }}</div>
           <div class="stat-label">Accounts</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">{{ uniqueRegions.length }}</div>
+          <div class="stat-value">{{ filterAccount ? filteredUniqueRegions.length : uniqueRegions.length }}</div>
           <div class="stat-label">Regions</div>
         </div>
       </div>
@@ -222,7 +238,8 @@ export default {
       filterState: '',
       sortField: 'start_time',
       sortDirection: 'desc',
-      actionLoading: {}
+      actionLoading: {},
+      deletingOldSnapshots: false
     }
   },
   computed: {
@@ -240,6 +257,26 @@ export default {
     },
     totalSizeGB() {
       return this.snapshots.reduce((sum, s) => sum + (s.volume_size || 0), 0)
+    },
+    filteredTotalSizeGB() {
+      return this.filteredSnapshots.reduce((sum, s) => sum + (s.volume_size || 0), 0)
+    },
+    filteredUniqueRegions() {
+      return [...new Set(this.filteredSnapshots.map(s => s.region))].sort()
+    },
+    selectedAccountName() {
+      if (!this.filterAccount) return ''
+      const account = this.uniqueAccounts.find(a => a.id === this.filterAccount)
+      return account ? `${account.name} (${account.id})` : this.filterAccount
+    },
+    oldSnapshotsCount() {
+      if (!this.filterAccount) return 0
+      const sixMonthsAgo = new Date()
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+      return this.filteredSnapshots.filter(s => {
+        const snapshotDate = new Date(s.start_time)
+        return snapshotDate < sixMonthsAgo && s.state === 'completed'
+      }).length
     },
     filteredSnapshots() {
       let result = this.snapshots
@@ -279,6 +316,9 @@ export default {
         if (this.sortField === 'start_time') {
           aVal = new Date(aVal)
           bVal = new Date(bVal)
+        } else if (this.sortField === 'volume_size') {
+          aVal = aVal || 0
+          bVal = bVal || 0
         } else if (typeof aVal === 'string') {
           aVal = aVal.toLowerCase()
           bVal = bVal.toLowerCase()
@@ -383,6 +423,49 @@ export default {
       } catch (error) {
         console.error('Failed to download JSON:', error)
         alert('Failed to download JSON file')
+      }
+    },
+    async deleteOldSnapshots() {
+      if (!this.filterAccount) {
+        alert('Please select an account first')
+        return
+      }
+
+      const count = this.oldSnapshotsCount
+      if (count === 0) {
+        alert('No snapshots older than 6 months found in the selected account')
+        return
+      }
+
+      const confirmMessage = `Are you sure you want to DELETE ${count} snapshot${count !== 1 ? 's' : ''} older than 6 months in ${this.selectedAccountName}?\n\nThis action cannot be undone!`
+      if (!confirm(confirmMessage)) return
+
+      this.deletingOldSnapshots = true
+
+      try {
+        const response = await axios.delete(`/api/accounts/${this.filterAccount}/snapshots/old`, {
+          params: { older_than_months: 6 }
+        })
+
+        const deletedCount = response.data.count || 0
+        alert(`Successfully deleted ${deletedCount} snapshot${deletedCount !== 1 ? 's' : ''} older than 6 months.`)
+        
+        // Refresh the data to update the list
+        await this.loadData()
+      } catch (error) {
+        console.error('Failed to delete old snapshots:', error)
+        const errorMsg = error.response?.data?.error || 'Failed to delete old snapshots. Please try again.'
+        const deletedCount = error.response?.data?.count || 0
+        
+        if (deletedCount > 0) {
+          alert(`Partially completed: ${deletedCount} snapshot${deletedCount !== 1 ? 's' : ''} deleted, but some errors occurred.\n\n${errorMsg}`)
+          // Refresh the data to update the list
+          await this.loadData()
+        } else {
+          alert(errorMsg)
+        }
+      } finally {
+        this.deletingOldSnapshots = false
       }
     }
   }
@@ -583,11 +666,13 @@ export default {
   background: var(--color-bg-primary);
   border-radius: 0.75rem;
   border: 1px solid var(--color-border);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .data-table {
   width: 100%;
+  min-width: 900px;
   border-collapse: collapse;
   font-size: 0.875rem;
 }

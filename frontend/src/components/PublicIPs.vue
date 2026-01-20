@@ -488,6 +488,7 @@ h1 {
 
 .ip-table {
   width: 100%;
+  min-width: 800px;
   border-collapse: collapse;
   background: var(--color-bg-primary);
 }

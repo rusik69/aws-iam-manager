@@ -23,6 +23,8 @@ type Server struct {
 	handler         *handlers.Handler
 	azureHandler    *handlers.AzureHandler
 	azureRMHandler  *handlers.AzureRMHandler
+	ssoHandler      *handlers.SSOHandler
+	ssoInitError    error
 }
 
 func NewServer(cfg config.Config) *Server {
@@ -51,11 +53,26 @@ func NewServer(cfg config.Config) *Server {
 		log.Printf("[INFO] Azure Resource Manager service initialized successfully (works across all subscriptions)")
 	}
 
+	// Initialize SSO handler (optional - will log error if Identity Center not configured)
+	var ssoHandler *handlers.SSOHandler
+	var ssoInitError error
+	ssoService, err := services.NewSSOService(awsService)
+	if err != nil {
+		ssoInitError = err
+		log.Printf("[WARNING] SSO service not initialized: %v", err)
+		log.Printf("[INFO] SSO endpoints will return error messages. Ensure IAM Identity Center is enabled and you have the required permissions.")
+	} else {
+		ssoHandler = handlers.NewSSOHandler(ssoService)
+		log.Printf("[INFO] SSO service initialized successfully")
+	}
+
 	return &Server{
 		config:         cfg,
 		handler:        handler,
 		azureHandler:   azureHandler,
 		azureRMHandler: azureRMHandler,
+		ssoHandler:     ssoHandler,
+		ssoInitError:   ssoInitError,
 	}
 }
 
@@ -163,6 +180,7 @@ func (s *Server) SetupRoutes() *gin.Engine {
 		apiProtected.GET("/snapshots", s.handler.ListSnapshots)
 		apiProtected.GET("/accounts/:accountId/snapshots", s.handler.ListSnapshotsByAccount)
 		apiProtected.DELETE("/accounts/:accountId/regions/:region/snapshots/:snapshotId", s.handler.DeleteSnapshot)
+		apiProtected.DELETE("/accounts/:accountId/snapshots/old", s.handler.DeleteOldSnapshots)
 
 		// EC2 instances routes
 		apiProtected.GET("/ec2-instances", s.handler.ListEC2Instances)
@@ -239,6 +257,108 @@ func (s *Server) SetupRoutes() *gin.Engine {
 				azure.POST("/rm/cache/vms/invalidate", s.azureRMHandler.InvalidateVMsCache)
 				azure.POST("/rm/cache/storage/invalidate", s.azureRMHandler.InvalidateStorageCache)
 			}
+		}
+
+		// SSO routes (always register, but return error if not initialized)
+		sso := apiProtected.Group("/sso")
+		
+		// Helper function to handle SSO not initialized
+		handleSSONotInitialized := func(c *gin.Context) {
+			errorMsg := "SSO service is not available"
+			details := "Ensure IAM Identity Center is enabled and the service has the required permissions."
+			if s.ssoInitError != nil {
+				errorMsg = s.ssoInitError.Error()
+			}
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":   errorMsg,
+				"details": details,
+			})
+		}
+		
+		// Diagnostic endpoint to check SSO status
+		sso.GET("/status", func(c *gin.Context) {
+			if s.ssoHandler != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"status": "available",
+					"message": "SSO service is initialized and ready",
+				})
+			} else {
+				errorMsg := "SSO service is not available"
+				if s.ssoInitError != nil {
+					errorMsg = s.ssoInitError.Error()
+				}
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"status":  "unavailable",
+					"error":   errorMsg,
+					"details": "Ensure IAM Identity Center is enabled and the service has the required permissions. Check server logs for more details.",
+				})
+			}
+		})
+		
+		// Identity Center instance
+		if s.ssoHandler != nil {
+			sso.GET("/instance", s.ssoHandler.GetIdentityCenterInstance)
+		} else {
+			sso.GET("/instance", handleSSONotInitialized)
+		}
+
+		// User routes
+		if s.ssoHandler != nil {
+			sso.GET("/users", s.ssoHandler.ListSSOUsers)
+			sso.GET("/users/:userId", s.ssoHandler.GetSSOUser)
+			sso.GET("/users/:userId/assignments", s.ssoHandler.ListUserAccountAssignments)
+		} else {
+			sso.GET("/users", handleSSONotInitialized)
+			sso.GET("/users/:userId", handleSSONotInitialized)
+			sso.GET("/users/:userId/assignments", handleSSONotInitialized)
+		}
+
+		// Group routes
+		if s.ssoHandler != nil {
+			sso.GET("/groups", s.ssoHandler.ListSSOGroups)
+			sso.GET("/groups/:groupId", s.ssoHandler.GetSSOGroup)
+			sso.GET("/groups/:groupId/members", s.ssoHandler.ListGroupMembers)
+			sso.GET("/groups/:groupId/assignments", s.ssoHandler.ListGroupAccountAssignments)
+		} else {
+			sso.GET("/groups", handleSSONotInitialized)
+			sso.GET("/groups/:groupId", handleSSONotInitialized)
+			sso.GET("/groups/:groupId/members", handleSSONotInitialized)
+			sso.GET("/groups/:groupId/assignments", handleSSONotInitialized)
+		}
+
+		// Account assignment routes
+		if s.ssoHandler != nil {
+			sso.GET("/accounts/:accountId/assignments", s.ssoHandler.ListAccountAssignments)
+		} else {
+			sso.GET("/accounts/:accountId/assignments", handleSSONotInitialized)
+		}
+
+		// Aggregated assignment routes
+		if s.ssoHandler != nil {
+			sso.GET("/user-assignments", s.ssoHandler.ListAllUserAssignments)
+			sso.GET("/group-assignments", s.ssoHandler.ListAllGroupAssignments)
+			sso.GET("/account-assignments", s.ssoHandler.ListAllAccountAssignments)
+		} else {
+			sso.GET("/user-assignments", handleSSONotInitialized)
+			sso.GET("/group-assignments", handleSSONotInitialized)
+			sso.GET("/account-assignments", handleSSONotInitialized)
+		}
+
+		// SSO cache management routes
+		if s.ssoHandler != nil {
+			sso.POST("/cache/clear", s.ssoHandler.ClearSSOCache)
+			sso.POST("/cache/users/invalidate", s.ssoHandler.InvalidateSSOUsersCache)
+			sso.POST("/cache/groups/invalidate", s.ssoHandler.InvalidateSSOGroupsCache)
+			sso.POST("/cache/users/:userId/invalidate", s.ssoHandler.InvalidateSSOUserCache)
+			sso.POST("/cache/groups/:groupId/invalidate", s.ssoHandler.InvalidateSSOGroupCache)
+			sso.POST("/cache/accounts/:accountId/assignments/invalidate", s.ssoHandler.InvalidateAccountAssignmentsCache)
+		} else {
+			sso.POST("/cache/clear", handleSSONotInitialized)
+			sso.POST("/cache/users/invalidate", handleSSONotInitialized)
+			sso.POST("/cache/groups/invalidate", handleSSONotInitialized)
+			sso.POST("/cache/users/:userId/invalidate", handleSSONotInitialized)
+			sso.POST("/cache/groups/:groupId/invalidate", handleSSONotInitialized)
+			sso.POST("/cache/accounts/:accountId/assignments/invalidate", handleSSONotInitialized)
 		}
 
 		// Cache management routes

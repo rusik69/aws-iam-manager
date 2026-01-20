@@ -2,6 +2,8 @@ package services
 
 import (
 	"fmt"
+	"math"
+	"strings"
 	"sync"
 
 	"github.com/rusik69/aws-iam-manager/internal/models"
@@ -14,6 +16,186 @@ import (
 // ============================================================================
 // EC2 INSTANCE MANAGEMENT
 // ============================================================================
+
+// calculateEC2InstanceMonthlyCost calculates the monthly cost for an EC2 instance
+// Based on AWS EC2 On-Demand Linux pricing (US East N. Virginia region as baseline)
+// Pricing varies by region, but this provides a reasonable estimate
+// Note: Only running instances incur costs, stopped instances cost $0
+func calculateEC2InstanceMonthlyCost(instanceType, state string) float64 {
+	// Stopped instances don't incur compute costs
+	if state != "running" {
+		return 0.0
+	}
+
+	// EC2 On-Demand Linux pricing per hour (US East N. Virginia baseline)
+	// Prices are approximate and may vary by region
+	hourlyPricing := map[string]float64{
+		// t3 family (burstable performance)
+		"t3.nano":     0.0052,
+		"t3.micro":    0.0104,
+		"t3.small":    0.0208,
+		"t3.medium":   0.0416,
+		"t3.large":    0.0832,
+		"t3.xlarge":   0.1664,
+		"t3.2xlarge":  0.3328,
+		// t3a family
+		"t3a.nano":    0.0047,
+		"t3a.micro":   0.0094,
+		"t3a.small":   0.0188,
+		"t3a.medium":  0.0376,
+		"t3a.large":   0.0752,
+		"t3a.xlarge":  0.1504,
+		"t3a.2xlarge": 0.3008,
+		// t4g family (ARM-based)
+		"t4g.nano":    0.0034,
+		"t4g.micro":   0.0068,
+		"t4g.small":   0.0136,
+		"t4g.medium":  0.0272,
+		"t4g.large":   0.0544,
+		"t4g.xlarge":  0.1088,
+		"t4g.2xlarge": 0.2176,
+		// m5 family (general purpose)
+		"m5.large":    0.096,
+		"m5.xlarge":   0.192,
+		"m5.2xlarge":  0.384,
+		"m5.4xlarge":  0.768,
+		"m5.8xlarge":  1.536,
+		"m5.12xlarge": 2.304,
+		"m5.16xlarge": 3.072,
+		"m5.24xlarge": 4.608,
+		// m5a family
+		"m5a.large":    0.086,
+		"m5a.xlarge":   0.172,
+		"m5a.2xlarge":  0.344,
+		"m5a.4xlarge":  0.688,
+		"m5a.8xlarge":  1.376,
+		"m5a.12xlarge": 2.064,
+		"m5a.16xlarge": 2.752,
+		"m5a.24xlarge": 4.128,
+		// m6i family
+		"m6i.large":    0.096,
+		"m6i.xlarge":   0.192,
+		"m6i.2xlarge":  0.384,
+		"m6i.4xlarge":  0.768,
+		"m6i.8xlarge":  1.536,
+		"m6i.12xlarge": 2.304,
+		"m6i.16xlarge": 3.072,
+		"m6i.24xlarge": 4.608,
+		"m6i.32xlarge": 6.144,
+		// c5 family (compute optimized)
+		"c5.large":    0.085,
+		"c5.xlarge":   0.17,
+		"c5.2xlarge":  0.34,
+		"c5.4xlarge":  0.68,
+		"c5.9xlarge":  1.53,
+		"c5.12xlarge": 2.04,
+		"c5.18xlarge": 3.06,
+		"c5.24xlarge": 4.08,
+		// c5a family
+		"c5a.large":    0.077,
+		"c5a.xlarge":   0.154,
+		"c5a.2xlarge":  0.308,
+		"c5a.4xlarge":  0.616,
+		"c5a.8xlarge":  1.232,
+		"c5a.12xlarge": 1.848,
+		"c5a.16xlarge": 2.464,
+		"c5a.24xlarge": 3.696,
+		// c6i family
+		"c6i.large":    0.085,
+		"c6i.xlarge":   0.17,
+		"c6i.2xlarge":  0.34,
+		"c6i.4xlarge":  0.68,
+		"c6i.8xlarge":  1.36,
+		"c6i.12xlarge": 2.04,
+		"c6i.16xlarge": 2.72,
+		"c6i.24xlarge": 4.08,
+		"c6i.32xlarge": 5.44,
+		// r5 family (memory optimized)
+		"r5.large":    0.126,
+		"r5.xlarge":   0.252,
+		"r5.2xlarge":  0.504,
+		"r5.4xlarge":  1.008,
+		"r5.8xlarge":  2.016,
+		"r5.12xlarge": 3.024,
+		"r5.16xlarge": 4.032,
+		"r5.24xlarge": 6.048,
+		// r5a family
+		"r5a.large":    0.113,
+		"r5a.xlarge":   0.226,
+		"r5a.2xlarge":  0.452,
+		"r5a.4xlarge":  0.904,
+		"r5a.8xlarge":  1.808,
+		"r5a.12xlarge": 2.712,
+		"r5a.16xlarge": 3.616,
+		"r5a.24xlarge": 5.424,
+		// r6i family
+		"r6i.large":    0.126,
+		"r6i.xlarge":   0.252,
+		"r6i.2xlarge":  0.504,
+		"r6i.4xlarge":  1.008,
+		"r6i.8xlarge":  2.016,
+		"r6i.12xlarge": 3.024,
+		"r6i.16xlarge": 4.032,
+		"r6i.24xlarge": 6.048,
+		"r6i.32xlarge": 8.064,
+		// i3 family (storage optimized)
+		"i3.large":    0.156,
+		"i3.xlarge":   0.312,
+		"i3.2xlarge":  0.624,
+		"i3.4xlarge":  1.248,
+		"i3.8xlarge":  2.496,
+		"i3.16xlarge": 4.992,
+		// i3en family
+		"i3en.large":    0.216,
+		"i3en.xlarge":   0.432,
+		"i3en.2xlarge":  0.864,
+		"i3en.3xlarge":  1.296,
+		"i3en.6xlarge":  2.592,
+		"i3en.12xlarge": 5.184,
+		"i3en.24xlarge": 10.368,
+		// g4dn family (GPU)
+		"g4dn.xlarge":   0.526,
+		"g4dn.2xlarge":  0.752,
+		"g4dn.4xlarge":  1.204,
+		"g4dn.8xlarge":  2.176,
+		"g4dn.12xlarge": 3.108,
+		"g4dn.16xlarge": 4.352,
+		// p3 family (GPU)
+		"p3.2xlarge":  3.06,
+		"p3.8xlarge":  12.24,
+		"p3.16xlarge": 24.48,
+		// p4d family (GPU)
+		"p4d.24xlarge": 32.77,
+	}
+
+	// Normalize instance type (lowercase)
+	instanceTypeLower := strings.ToLower(instanceType)
+
+	// Look up pricing
+	hourlyRate, found := hourlyPricing[instanceTypeLower]
+	if !found {
+		// For unknown instance types, try to estimate based on pattern
+		// This is a rough heuristic - actual pricing may vary
+		if strings.HasPrefix(instanceTypeLower, "t3.") || strings.HasPrefix(instanceTypeLower, "t3a.") {
+			hourlyRate = 0.05 // Default for t3 family
+		} else if strings.HasPrefix(instanceTypeLower, "t4g.") {
+			hourlyRate = 0.04 // Default for t4g family
+		} else if strings.HasPrefix(instanceTypeLower, "m5.") || strings.HasPrefix(instanceTypeLower, "m5a.") || strings.HasPrefix(instanceTypeLower, "m6i.") {
+			hourlyRate = 0.20 // Default for m5/m6i family
+		} else if strings.HasPrefix(instanceTypeLower, "c5.") || strings.HasPrefix(instanceTypeLower, "c5a.") || strings.HasPrefix(instanceTypeLower, "c6i.") {
+			hourlyRate = 0.18 // Default for c5/c6i family
+		} else if strings.HasPrefix(instanceTypeLower, "r5.") || strings.HasPrefix(instanceTypeLower, "r5a.") || strings.HasPrefix(instanceTypeLower, "r6i.") {
+			hourlyRate = 0.25 // Default for r5/r6i family
+		} else {
+			hourlyRate = 0.10 // Generic default
+		}
+	}
+
+	// Calculate monthly cost: hourly rate * 24 hours * 30 days
+	monthlyCost := hourlyRate * 24 * 30
+
+	return math.Round(monthlyCost*100) / 100 // Round to 2 decimal places
+}
 
 func (s *AWSService) ListEC2Instances() ([]models.EC2Instance, error) {
 	const cacheKey = "ec2-instances"
@@ -191,14 +373,21 @@ func (s *AWSService) getEC2InstancesForRegion(sess *session.Session, account mod
 					})
 				}
 
+				instanceType := aws.StringValue(instance.InstanceType)
+				instanceState := aws.StringValue(instance.State.Name)
+				
+				// Calculate monthly cost
+				monthlyCost := calculateEC2InstanceMonthlyCost(instanceType, instanceState)
+
 				ec2Instance := models.EC2Instance{
 					InstanceID:   aws.StringValue(instance.InstanceId),
 					Name:         instanceName,
 					AccountID:    account.ID,
 					AccountName:  account.Name,
 					Region:       region,
-					InstanceType: aws.StringValue(instance.InstanceType),
-					State:        aws.StringValue(instance.State.Name),
+					InstanceType: instanceType,
+					State:        instanceState,
+					MonthlyCost:  monthlyCost,
 					Tags:         tags,
 				}
 

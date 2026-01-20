@@ -185,6 +185,23 @@ Resources:
               - 's3:PutBucketTagging'
               - 's3:PutBucketPublicAccessBlock'
             Resource: 'arn:aws:s3:::*'
+          - Sid: 'AllowSSOIdentityCenterManagement'
+            Effect: Allow
+            Action:
+              - 'sso:ListInstances'
+              - 'identitystore:ListUsers'
+              - 'identitystore:DescribeUser'
+              - 'identitystore:ListGroups'
+              - 'identitystore:DescribeGroup'
+              - 'identitystore:ListGroupMemberships'
+              - 'identitystore:IsMemberInGroups'
+              - 'sso:ListPermissionSets'
+              - 'sso:DescribePermissionSet'
+              - 'sso:ListAccountAssignments'
+              - 'sso:ListAccountAssignmentsForPrincipal'
+              - 'sso:ListManagedPoliciesInPermissionSet'
+              - 'sso:GetInlinePolicyForPermissionSet'
+            Resource: '*'
       Roles:
         - !Ref IAMManagerCrossAccountRole
 
